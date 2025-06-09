@@ -7,18 +7,22 @@ EMPTY_SVG_DATAURL = (
 
 def main():
     # Load and tokenize the SVG
-    tokenizer = bird.SVGTokenizer()
-    a = tokenizer.process_svg_file("./test.svg")
+    tokenizer = bird.SVGTokenizer("./test.svg")
+    tokenizer.parse_and_tokenize()
     
     # Get all matched groups
-    def modifier(index: int):
-        tokenizer.modify_group_content(a["parser_instance"], index, f"Card {index}", EMPTY_SVG_DATAURL)
-
+    groups = tokenizer.get_matched_groups()
+    
     # Process each group: replace image and label
-    for i in range(6*9):
-        modifier(i)
+    for idx, group in enumerate(groups, start=1):
+        # Replace label with "Card 01", "Card 02", etc.
+        label_text = f"Card {idx:02d}"
+        tokenizer.modify_group_labels(idx, label_text)
+        # elif token.type == "image":
+        #     tokenizer.modify_token(token, EMPTY_SVG_DATAURL)
     
     # Save the modified SVG
-    tokenizer.parser.save_svg("modified_test.svg")
+    tokenizer.save_svg("./test_output.svg")
+
 if __name__ == "__main__":
     main()
