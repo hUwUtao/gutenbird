@@ -14,9 +14,10 @@ def main():
     groups = tokenizer.get_matched_groups()
     
     # Process each group: replace image and label
-    for idx, group in enumerate(groups, start=1):
+    for idx,_ in enumerate(groups, start=0):
         # Replace label with "Card 01", "Card 02", etc.
-        label_text = f"Card {idx:02d}"
+        ldx=idx+1
+        label_text = f"Card {ldx:02d}"
         tokenizer.modify_group_labels(idx, label_text)
         # elif token.type == "image":
         #     tokenizer.modify_token(token, EMPTY_SVG_DATAURL)

@@ -240,12 +240,29 @@ class SVGTokenizer:
     def _modify_text_token(self, token: SVGToken, new_content: str):
         """Modify text token content"""
         if token.element is not None:
-            # Clear existing content
-            token.element.clear()
-            token.element.text = new_content
-            # Preserve attributes
-            for key, value in token.element.attrib.items():
-                token.element.set(key, value)
+            # Check if there are tspan elements within the text element
+            tspan_elements = [child for child in token.element if child.tag.endswith('tspan')]
+            
+            if tspan_elements:
+                # Replace content of the first tspan only
+                first_tspan = tspan_elements[0]
+                first_tspan.clear()
+                first_tspan.text = new_content
+                # Preserve tspan attributes
+                for key, value in first_tspan.attrib.items():
+                    first_tspan.set(key, value)
+            else:
+                # Fallback: replace the whole text element content
+                # Store original attributes
+                original_attribs = dict(token.element.attrib)
+                
+                # Clear existing content
+                token.element.clear()
+                token.element.text = new_content
+                
+                # Restore attributes
+                for key, value in original_attribs.items():
+                    token.element.set(key, value)
     
     def _modify_image_token(self, token: SVGToken, new_content: str):
         """Modify image token href"""
