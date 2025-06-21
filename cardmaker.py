@@ -9,6 +9,8 @@ import concurrent.futures
 import csv
 import gzip
 from typing import Dict, List, Tuple
+import threading
+import queue
 
 MAX_IMAGE_DIM = 512
 
@@ -90,19 +92,36 @@ def get_image_cache_csv(cache_path):
                         file_path, mtime, data_url = row
                         cache_key = f"{file_path}|{mtime}"
                         cache[cache_key] = data_url
+                f.flush()
+                f.close()
         except Exception as e:
             print(f"Failed to read image cache: {e}")
+            exit(1)
     return cache
 
-def append_image_cache_csv(cache_path, file_path, mtime, data_url):
-    try:
-        with gzip.open(cache_path, 'at', encoding='utf-8', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([file_path, mtime, data_url])
-    except Exception as e:
-        print(f"Failed to append to image cache: {e}")
+# def append_image_cache_csv(cache_path, file_path, mtime, data_url):
+#     try:
+#         with gzip.open(cache_path, 'at', encoding='utf-8', newline='') as f:
+#             writer = csv.writer(f)
+#             writer.writerow([file_path, mtime, data_url])
+#     except Exception as e:
+#         print(f"Failed to append to image cache: {e}")
 
-def process_image_with_cache(image_path, cache, cache_path):
+def wal_writer_thread(cache_path, wal_queue, stop_event):
+    with gzip.open(cache_path, 'at', encoding='utf-8', newline='') as f:
+        csv_writer = csv.writer(f)
+        while not stop_event.is_set() or not wal_queue.empty():
+            try:
+                entry = wal_queue.get(timeout=0.1)
+                if entry is None:
+                    break
+                file_path, mtime, data_url = entry
+                csv_writer.writerow([file_path, mtime, data_url])
+                wal_queue.task_done()
+            except queue.Empty:
+                continue
+
+def process_image_with_cache(image_path, cache, cache_path, wal_queue=None):
     try:
         mtime = os.path.getmtime(image_path)
     except Exception:
@@ -112,12 +131,15 @@ def process_image_with_cache(image_path, cache, cache_path):
         return cache[cache_key]
     data_url = process_image(image_path)
     cache[cache_key] = data_url
-    append_image_cache_csv(cache_path, image_path, mtime, data_url)
+    if wal_queue is not None:
+        wal_queue.put((image_path, mtime, data_url))
+    # else:
+    #     append_image_cache_csv(cache_path, image_path, mtime, data_url)
     return data_url
 
 def process_image_with_index(args):
-    img_info, idx, total, set_name, cache, cache_path = args
-    data_url = process_image_with_cache(img_info['file_path'], cache, cache_path)
+    img_info, idx, total, set_name, cache, cache_path, wal_queue = args
+    data_url = process_image_with_cache(img_info['file_path'], cache, cache_path, wal_queue)
     return ({
         "label": img_info['label'],
         "image": data_url,
@@ -125,24 +147,34 @@ def process_image_with_index(args):
     }, idx - 1)  # -1 because idx starts from 1
 
 def process_image_sets(image_sets, cache_path="./dist/.imgcache"):
-    print("\n=== Processing Images (Parallel, with WAL CSV cache) ===")
+    print("\n=== Processing Images (Parallel, with WAL CSV cache via queue) ===")
     processed_sets = {}
     cache = get_image_cache_csv(cache_path)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=24) as executor:
-        for set_name, images in image_sets.items():
-            total = len(images)
-            futures = []
-            for idx, img_info in enumerate(images, 1):
-                future = executor.submit(
-                    process_image_with_index,
-                    (img_info, idx, total, set_name, cache, cache_path)
-                )
-                futures.append(future)
-            results = []
-            for future in concurrent.futures.as_completed(futures):
-                result, original_idx = future.result()
-                results.append((original_idx, result))
-            processed_sets[set_name] = [r[1] for r in sorted(results, key=lambda x: x[0])]
+    wal_queue = queue.Queue()
+    stop_event = threading.Event()
+    writer_thread = threading.Thread(target=wal_writer_thread, args=(cache_path, wal_queue, stop_event))
+    writer_thread.start()
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=24) as executor:
+            for set_name, images in image_sets.items():
+                total = len(images)
+                futures = []
+                for idx, img_info in enumerate(images, 1):
+                    future = executor.submit(
+                        process_image_with_index,
+                        (img_info, idx, total, set_name, cache, cache_path, wal_queue)
+                    )
+                    futures.append(future)
+                results = []
+                for future in concurrent.futures.as_completed(futures):
+                    result, original_idx = future.result()
+                    results.append((original_idx, result))
+                processed_sets[set_name] = [r[1] for r in sorted(results, key=lambda x: x[0])]
+        wal_queue.join()
+    finally:
+        stop_event.set()
+        wal_queue.put(None)
+        writer_thread.join()
     return processed_sets
 
 def process_image_set(root_path, template_path, output_dir):
@@ -193,6 +225,7 @@ def process_image_set(root_path, template_path, output_dir):
     print("\n=== Converting SVGs to PDFs in parallel ===")
     for (svg_path, pdf_path) in svg_pdf_pairs:
         # Use CairoSVG to convert SVG to PDF
+        print(f"Converting {os.path.basename(svg_path)} to PDF...")
         cairosvg.svg2pdf(url=svg_path, write_to=pdf_path)
     # def svg_to_pdf_task(pair):
     #     svg_path, pdf_path = pair
