@@ -177,6 +177,19 @@ def process_image_sets(image_sets, cache_path="./dist/.imgcache"):
         writer_thread.join()
     return processed_sets
 
+ONEPIXEL = "data:image/webp;base64,UklGRhYAAABXRUJQVlA4TAoAAAAvAAAAAEX/I/of"
+SLICE_SIZE = 6
+
+def make_slices(images, slice_size, onepixel, set_name):
+    slices = []
+    for i in range(0, len(images), slice_size):
+        chunk = images[i:i+slice_size]
+        # Pad if not enough
+        if len(chunk) < slice_size:
+            chunk = chunk + [{"label": "", "image": onepixel}] * (slice_size - len(chunk))
+        slices.append({"set": set_name, "items": chunk})
+    return slices
+
 def process_image_set(root_path, template_path, output_dir):
     svg_dir = os.path.join(output_dir, "svg")
     pdf_dir = os.path.join(output_dir, "pdf")
@@ -199,43 +212,43 @@ def process_image_set(root_path, template_path, output_dir):
     print(f"\nTemplate info:")
     print(f"- Cards per page: {slots_per_page}")
     svg_pdf_pairs = []
+    # Step 3: Collect all slices from all sets
+    all_slices = []
     for set_name, images in processed_sets.items():
-        print(f"\nProcessing pages for set '{set_name}':")
-        num_pages = (len(images) + slots_per_page - 1) // slots_per_page
-        print(f"- {len(images)} images will be split into {num_pages} pages")
-        for i in range(0, len(images), slots_per_page):
-            tokenizer = bird.SVGTokenizer(template_path)
-            tokenizer.parse_and_tokenize()
-            groups = tokenizer.get_matched_groups()
-            batch = images[i:i + slots_per_page]
-            current_page = (i // slots_per_page) + 1
-            print(f"\nCreating page {current_page}/{num_pages} with {len(batch)} cards:")
-            for idx, image_data in enumerate(batch):
-                if idx >= len(groups):
-                    break
-                tokenizer.modify_group_labels(idx, image_data["label"])
-                tokenizer.modify_group_images(idx, image_data["image"])
-            output_svg = os.path.join(svg_dir, f"page_{page_counter:03d}.svg")
-            output_pdf = os.path.join(pdf_dir, f"page_{page_counter:03d}.pdf")
-            tokenizer.save_svg(output_svg)
-            print(f"Saved SVG as {os.path.basename(output_svg)}")
-            svg_pdf_pairs.append((output_svg, output_pdf))
-            page_counter += 1
+        slices = make_slices(images, SLICE_SIZE, ONEPIXEL, set_name)
+        all_slices.extend(slices)
+    slices_per_page = slots_per_page // SLICE_SIZE
+    if slices_per_page == 0:
+        print(f"Template has too few groups for slice size {SLICE_SIZE}!")
+        return
+    # Step 4: Group slices into pages (across all sets)
+    page_slices = [all_slices[i:i+slices_per_page] for i in range(0, len(all_slices), slices_per_page)]
+    print(f"- {sum(len(images) for images in processed_sets.values())} images split into {len(all_slices)} slices, {len(page_slices)} pages")
+    for page_idx, slice_group in enumerate(page_slices):
+        tokenizer = bird.SVGTokenizer(template_path)
+        tokenizer.parse_and_tokenize()
+        groups = tokenizer.get_matched_groups()
+        # Flatten the slice_group into a list of items for the page
+        page_items = [item for slice_ in slice_group for item in slice_["items"]]
+        # Fill up to slots_per_page with empty if needed
+        if len(page_items) < slots_per_page:
+            page_items += [{"label": "", "image": ONEPIXEL}] * (slots_per_page - len(page_items))
+        set_names = [slice_["set"] for slice_ in slice_group]
+        print(f"\nCreating page {page_idx+1}/{len(page_slices)} with {len(page_items)} items from sets: {set_names}")
+        for idx, item in enumerate(page_items):
+            tokenizer.modify_group_labels(idx, item["label"])
+            tokenizer.modify_group_images(idx, item["image"])
+        output_svg = os.path.join(svg_dir, f"page_{page_counter:03d}.svg")
+        output_pdf = os.path.join(pdf_dir, f"page_{page_counter:03d}.pdf")
+        tokenizer.save_svg(output_svg)
+        print(f"Saved SVG as {os.path.basename(output_svg)}")
+        svg_pdf_pairs.append((output_svg, output_pdf))
+        page_counter += 1
     # Convert SVGs to PDFs in parallel
     print("\n=== Converting SVGs to PDFs in parallel ===")
     for (svg_path, pdf_path) in svg_pdf_pairs:
-        # Use CairoSVG to convert SVG to PDF
         print(f"Converting {os.path.basename(svg_path)} to PDF...")
         cairosvg.svg2pdf(url=svg_path, write_to=pdf_path)
-    # def svg_to_pdf_task(pair):
-    #     svg_path, pdf_path = pair
-    #     try:
-    #         print(f"Exported PDF as {os.path.basename(pdf_path)}")
-    #     except Exception as e:
-    #         print(f"Failed to export PDF {os.path.basename(pdf_path)}: {e}")
-    # with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-    #     executor.map(svg_to_pdf_task, svg_pdf_pairs)
-
 def main():
     parser = argparse.ArgumentParser(description="Create SVG card pages from image directories.")
     parser.add_argument("root", type=str, help="Root directory to search for images")
