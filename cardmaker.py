@@ -4,23 +4,33 @@ import base64
 from PIL import Image
 import io
 import bird
+import concurrent.futures
+from typing import Dict, List, Tuple
+
+# cairo prec
+os.environ['PATH'] += ';C:\\Program Files\\GTK3-Runtime Win64\\bin'
+import cairosvg
 
 def process_image(image_path):
-    """Convert an image to a square ratio with a white background and return its data URL."""
+    """Convert an image to a square ratio with a white background and return its data URL, with alpha composited on white."""
     with Image.open(image_path) as img:
-        # Create a square canvas with a white background
+        # Convert to RGBA to ensure alpha channel is present
+        img = img.convert("RGBA")
         max_dim = max(img.size)
-        square_img = Image.new("RGB", (max_dim, max_dim), (255, 255, 255))
-        square_img.paste(img, ((max_dim - img.width) // 2, (max_dim - img.height) // 2))
-        
-        # Save the image as JPEG bytes
+        # Create a white RGBA background
+        white_bg = Image.new("RGBA", (max_dim, max_dim), (255, 255, 255, 255))
+        # Center the image on the white background using alpha_composite
+        offset = ((max_dim - img.width) // 2, (max_dim - img.height) // 2)
+        temp_img = Image.new("RGBA", (max_dim, max_dim), (0, 0, 0, 0))
+        temp_img.paste(img, offset)
+        composed = Image.alpha_composite(white_bg, temp_img)
+        # Convert back to RGB for PNG/JPEG encoding
+        final_img = composed.convert("RGB")
         img_bytes = io.BytesIO()
-        square_img.save(img_bytes, format="PNG")
+        final_img.save(img_bytes, format="JPEG")
         img_bytes = img_bytes.getvalue()
-        
-        # Convert to data URL
         b64_img = base64.b64encode(img_bytes).decode('utf-8')
-        return f"data:image/png;base64,{b64_img}"
+        return f"data:image/jpg;base64,{b64_img}"
 
 def discover_image_sets(root_path):
     """Discover all image sets and their files in the directory structure."""
@@ -38,10 +48,10 @@ def discover_image_sets(root_path):
         if not image_files:
             continue
             
-        print(f"\nDiscovered set '{set_name}':")
-        print(f"- Contains {len(image_files)} image files")
-        for f in image_files:
-            print(f"  └─ {f}")
+        # print(f"\nDiscovered set '{set_name}':")
+        # print(f"- Contains {len(image_files)} image files")
+        # for f in image_files:
+        #     print(f"  └─ {f}")
             
         image_sets[set_name] = [
             {
@@ -57,30 +67,54 @@ def discover_image_sets(root_path):
     print(f"Total images found: {total_files}")
     return image_sets
 
+def process_image_with_index(args: Tuple[dict, int, int, str]) -> Tuple[dict, int]:
+    """Process a single image with its index information."""
+    img_info, idx, total, set_name = args
+    # print(f"[{set_name}] [{idx}/{total}] Processing {img_info['original_name']}...")
+    data_url = process_image(img_info['file_path'])
+    return ({
+        "label": img_info['label'],
+        "image": data_url,
+        "original_name": img_info['original_name']
+    }, idx - 1)  # -1 because idx starts from 1
+
 def process_image_sets(image_sets):
-    """Process all images in all sets."""
-    print("\n=== Processing Images ===")
+    """Process all images in all sets using parallel processing."""
+    print("\n=== Processing Images (Parallel) ===")
     processed_sets = {}
     
-    for set_name, images in image_sets.items():
-        print(f"\nProcessing set '{set_name}':")
-        processed_sets[set_name] = []
-        
-        for idx, img_info in enumerate(images, 1):
-            print(f"[{idx}/{len(images)}] Processing {img_info['original_name']}...")
-            data_url = process_image(img_info['file_path'])
-            processed_sets[set_name].append({
-                "label": img_info['label'],
-                "image": data_url,
-                "original_name": img_info['original_name']
-            })
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        for set_name, images in image_sets.items():
+            # print(f"\nProcessing set '{set_name}':")
+            total = len(images)
+            
+            # Create tasks with indices
+            futures = []
+            for idx, img_info in enumerate(images, 1):
+                future = executor.submit(
+                    process_image_with_index, 
+                    (img_info, idx, total, set_name)
+                )
+                futures.append(future)
+            
+            # Collect results and maintain order
+            results = []
+            for future in concurrent.futures.as_completed(futures):
+                result, original_idx = future.result()
+                results.append((original_idx, result))
+            
+            # Sort by original index and store only the processed data
+            processed_sets[set_name] = [r[1] for r in sorted(results, key=lambda x: x[0])]
+            # print(f"Completed processing {total} images for set '{set_name}'")
     
     return processed_sets
 
 def process_image_set(root_path, template_path, output_dir):
-    """Process a directory of images and create SVG cards."""
-    # Create output directory if it doesn't exist
-    os.makedirs(output_dir, exist_ok=True)
+    """Process a directory of images and create SVG cards, then export to PDF."""
+    svg_dir = os.path.join(output_dir, "svg")
+    pdf_dir = os.path.join(output_dir, "pdf")
+    os.makedirs(svg_dir, exist_ok=True)
+    os.makedirs(pdf_dir, exist_ok=True)
     
     # Step 1: Discover all image sets
     image_sets = discover_image_sets(root_path)
@@ -121,15 +155,22 @@ def process_image_set(root_path, template_path, output_dir):
                 if idx >= len(groups):
                     break
                     
-                print(f"  └─ Adding {image_data['original_name']}")
+                # print(f"  └─ Adding {image_data['original_name']}")
                 # Set the label and image
                 tokenizer.modify_group_labels(idx, image_data["label"])
                 tokenizer.modify_group_images(idx, image_data["image"])
             
             # Save this page
-            output_path = os.path.join(output_dir, f"page_{page_counter:03d}.svg")
-            tokenizer.save_svg(output_path)
-            print(f"Saved as {os.path.basename(output_path)}")
+            output_svg = os.path.join(svg_dir, f"page_{page_counter:03d}.svg")
+            output_pdf = os.path.join(pdf_dir, f"page_{page_counter:03d}.pdf")
+            tokenizer.save_svg(output_svg)
+            print(f"Saved SVG as {os.path.basename(output_svg)}")
+            # Convert SVG to PDF with CairoSVG
+            try:
+                cairosvg.svg2pdf(url=output_svg, write_to=output_pdf)
+                print(f"Exported PDF as {os.path.basename(output_pdf)}")
+            except Exception as e:
+                print(f"Failed to export PDF: {e}")
             page_counter += 1
 
 def main():
@@ -143,3 +184,10 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# --- Font Embedding in SVG to PDF (CairoSVG) ---
+# To embed Inter or NotoSans, add to your SVG template:
+# <style>@font-face { font-family: 'Inter'; src: url('fonts/InterVariable.ttf'); }
+#        @font-face { font-family: 'NotoSans'; src: url('fonts/NotoSansVariable.ttf'); }</style>
+# and use <text style="font-family: 'Inter';"> or <text style="font-family: 'NotoSans';">
+# The font file path must be correct relative to the SVG or absolute.
