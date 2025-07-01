@@ -241,6 +241,7 @@ class SVGTokenizer:
         """Modify text token content"""
         if token.element is not None:
             # Check if there are tspan elements within the text element
+            text_element = token.element
             tspan_elements = [child for child in token.element if child.tag.endswith('tspan')]
             
             if tspan_elements:
@@ -248,6 +249,11 @@ class SVGTokenizer:
                 first_tspan = tspan_elements[0]
                 first_tspan.clear()
                 first_tspan.text = new_content
+                # Preserve text element attributes, replacing #008080 with #000000 in style
+                for key, value in text_element[0].attrib.items():
+                    if key == "style" and "#008080" in value:
+                        value = value.replace("#008080", "#000000")
+                    text_element[0].set(key, value)
                 # Preserve tspan attributes
                 for key, value in first_tspan.attrib.items():
                     first_tspan.set(key, value)

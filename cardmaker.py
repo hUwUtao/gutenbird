@@ -8,29 +8,29 @@ import bird
 import concurrent.futures
 import csv
 import gzip
-from typing import Dict, List, Tuple
 import threading
 import queue
+import re
 
+PLACEHOLDER_TEXT_COLOR = "#008080ff"
 MAX_IMAGE_DIM = 512
 
 csv.field_size_limit(sys.maxsize)
 
 # cairo prec
-os.environ['PATH'] += ';C:\\Program Files\\GTK3-Runtime Win64\\bin'
+if os.name == 'nt':
+    os.environ['PATH'] += ';C:\\Program Files\\GTK3-Runtime Win64\\bin'
 import cairosvg
 
 def process_image(image_path):
-    """Convert an image to a square ratio with a white background and return its data URL, with alpha composited on white."""
+    """Convert an image to a square ratio with a white background and return its data URL, scaling to fit the largest dimension."""
     with Image.open(image_path) as img:
-        # Convert to RGBA to ensure alpha channel is present
         img = img.convert("RGBA")
-        # Determine target square size
-        target_dim = MAX_IMAGE_DIM if MAX_IMAGE_DIM is not None else max(img.size)
-        # Calculate scale to fit image within the square, preserving aspect ratio
-        scale = min(target_dim / img.width, target_dim / img.height, 1.0)
+        target_dim = MAX_IMAGE_DIM
+        # Scale so the largest dimension matches target_dim
+        scale = target_dim / max(img.width, img.height)
         new_size = (round(img.width * scale), round(img.height * scale))
-        img = img.resize(new_size, Image.LANCZOS)
+        img = img.resize(new_size, Image.Resampling.LANCZOS)
         # Create a white RGBA square background
         square_bg = Image.new("RGBA", (target_dim, target_dim), (255, 255, 255, 255))
         # Center the resized image on the square background
@@ -38,7 +38,6 @@ def process_image(image_path):
         temp_img = Image.new("RGBA", (target_dim, target_dim), (0, 0, 0, 0))
         temp_img.paste(img, offset)
         composed = Image.alpha_composite(square_bg, temp_img)
-        # Convert back to RGB for PNG/JPEG encoding
         final_img = composed.convert("RGB")
         img_bytes = io.BytesIO()
         final_img.save(img_bytes, format="JPEG", quality=90, optimize=True)
@@ -146,6 +145,22 @@ def process_image_with_index(args):
         "original_name": img_info['original_name']
     }, idx - 1)  # -1 because idx starts from 1
 
+def filter_label(label: str) -> str:
+    # Trim the label
+    label = label.strip()
+    # Split by ., ,, _, -
+    parts = re.split(r'[.,_\-]', label)
+    # Trim each part
+    parts = [p.strip() for p in parts]
+    # Remove first part if it's empty, a single number, or a single character
+    if parts and (parts[0] == "" or (len(parts[0]) == 1) or parts[0].isdigit()):
+        parts = parts[1:]
+    # Remove last part if it's empty, a single number, or a single character
+    if parts and (parts[-1] == "" or (len(parts[-1]) == 1) or parts[-1].isdigit()):
+        parts = parts[:-1]
+    # Join with space
+    return " ".join(parts)
+
 def process_image_sets(image_sets, cache_path="./dist/.imgcache"):
     print("\n=== Processing Images (Parallel, with WAL CSV cache via queue) ===")
     processed_sets = {}
@@ -180,75 +195,116 @@ def process_image_sets(image_sets, cache_path="./dist/.imgcache"):
 ONEPIXEL = "data:image/webp;base64,UklGRhYAAABXRUJQVlA4TAoAAAAvAAAAAEX/I/of"
 SLICE_SIZE = 6
 
-def make_slices(images, slice_size, onepixel, set_name):
+def make_slices(images, slice_size, set_name):
     slices = []
     for i in range(0, len(images), slice_size):
         chunk = images[i:i+slice_size]
         # Pad if not enough
         if len(chunk) < slice_size:
-            chunk = chunk + [{"label": "", "image": onepixel}] * (slice_size - len(chunk))
+            chunk = chunk + [{"label": "", "image": ONEPIXEL}] * (slice_size - len(chunk))
         slices.append({"set": set_name, "items": chunk})
     return slices
 
-def process_image_set(root_path, template_path, output_dir):
-    svg_dir = os.path.join(output_dir, "svg")
-    pdf_dir = os.path.join(output_dir, "pdf")
-    os.makedirs(svg_dir, exist_ok=True)
-    os.makedirs(pdf_dir, exist_ok=True)
-    # Step 1: Discover all image sets
+def discover_and_process_images(root_path, cache_path, slice_size, onepixel):
     image_sets = discover_image_sets(root_path)
     if not image_sets:
         print("\nNo image sets found!")
-        return
-    # Step 2: Process all images
-    processed_sets = process_image_sets(image_sets)
-    print("\n=== Creating SVG Pages ===")
-    page_counter = 1
-    # Load template once to get number of slots
+        return None
+    processed_sets = process_image_sets(image_sets, cache_path=cache_path)
+    return processed_sets
+
+def load_template_info(template_path):
     tokenizer = bird.SVGTokenizer(template_path)
     tokenizer.parse_and_tokenize()
     groups = tokenizer.get_matched_groups()
     slots_per_page = len(groups)
     print(f"\nTemplate info:")
     print(f"- Cards per page: {slots_per_page}")
-    svg_pdf_pairs = []
-    # Step 3: Collect all slices from all sets
+    return tokenizer, groups, slots_per_page
+
+def collect_all_slices(processed_sets, slice_size):
     all_slices = []
     for set_name, images in processed_sets.items():
-        slices = make_slices(images, SLICE_SIZE, ONEPIXEL, set_name)
+        slices = make_slices(images, slice_size, set_name)
         all_slices.extend(slices)
-    slices_per_page = slots_per_page // SLICE_SIZE
+    return all_slices
+
+def group_slices_into_pages(all_slices, slots_per_page, slice_size):
+    slices_per_page = slots_per_page // slice_size
     if slices_per_page == 0:
-        print(f"Template has too few groups for slice size {SLICE_SIZE}!")
-        return
-    # Step 4: Group slices into pages (across all sets)
+        print(f"Template has too few groups for slice size {slice_size}!")
+        return None, 0
     page_slices = [all_slices[i:i+slices_per_page] for i in range(0, len(all_slices), slices_per_page)]
-    print(f"- {sum(len(images) for images in processed_sets.values())} images split into {len(all_slices)} slices, {len(page_slices)} pages")
+    print(f"- {sum(len(slice['items']) for slice in all_slices)} images split into {len(all_slices)} slices, {len(page_slices)} pages")
+    return page_slices, slices_per_page
+
+def create_svg_pages(page_slices, template_path, slots_per_page, onepixel, svg_dir):
+    svg_pdf_pairs = []
+    page_counter = 1
     for page_idx, slice_group in enumerate(page_slices):
         tokenizer = bird.SVGTokenizer(template_path)
         tokenizer.parse_and_tokenize()
         groups = tokenizer.get_matched_groups()
-        # Flatten the slice_group into a list of items for the page
         page_items = [item for slice_ in slice_group for item in slice_["items"]]
-        # Fill up to slots_per_page with empty if needed
         if len(page_items) < slots_per_page:
-            page_items += [{"label": "", "image": ONEPIXEL}] * (slots_per_page - len(page_items))
+            page_items += [{"label": "", "image": onepixel}] * (slots_per_page - len(page_items))
         set_names = [slice_["set"] for slice_ in slice_group]
         print(f"\nCreating page {page_idx+1}/{len(page_slices)} with {len(page_items)} items from sets: {set_names}")
         for idx, item in enumerate(page_items):
-            tokenizer.modify_group_labels(idx, item["label"])
+            tokenizer.modify_group_labels(idx, filter_label(item["label"]))
             tokenizer.modify_group_images(idx, item["image"])
         output_svg = os.path.join(svg_dir, f"page_{page_counter:03d}.svg")
-        output_pdf = os.path.join(pdf_dir, f"page_{page_counter:03d}.pdf")
+        output_pdf = os.path.join(os.path.dirname(svg_dir), "pdf", f"page_{page_counter:03d}.pdf")
         tokenizer.save_svg(output_svg)
         print(f"Saved SVG as {os.path.basename(output_svg)}")
         svg_pdf_pairs.append((output_svg, output_pdf))
         page_counter += 1
-    # Convert SVGs to PDFs in parallel
+    return svg_pdf_pairs
+
+def convert_svgs_to_pdfs(svg_pdf_pairs):
     print("\n=== Converting SVGs to PDFs in parallel ===")
     for (svg_path, pdf_path) in svg_pdf_pairs:
         print(f"Converting {os.path.basename(svg_path)} to PDF...")
         cairosvg.svg2pdf(url=svg_path, write_to=pdf_path)
+
+def merge_pdfs(svg_pdf_pairs, output_dir):
+    print("\n=== Merging all PDFs into dist/final.pdf ===")
+    from pypdf import PdfWriter
+    pdf_files = [pdf_path for (_, pdf_path) in svg_pdf_pairs]
+    writer = PdfWriter()
+    for pdf_file in pdf_files:
+        with open(pdf_file, "rb") as f:
+            writer.append(f)
+    final_pdf_path = os.path.join(output_dir, "final.pdf")
+    final_pdf_path = os.path.abspath(final_pdf_path)
+    with open(final_pdf_path, "wb") as out_f:
+        writer.write(out_f)
+    print(f"Merged {len(pdf_files)} PDFs into {final_pdf_path}")
+
+def process_image_set(root_path, template_path, output_dir):
+    svg_dir = os.path.join(output_dir, "svg")
+    pdf_dir = os.path.join(output_dir, "pdf")
+    os.makedirs(svg_dir, exist_ok=True)
+    os.makedirs(pdf_dir, exist_ok=True)
+    cache_path = os.path.join(output_dir, ".imgcache")
+    # Step 1: Discover and process images
+    processed_sets = discover_and_process_images(root_path, cache_path, SLICE_SIZE, ONEPIXEL)
+    if not processed_sets:
+        return
+    # Step 2: Load template info
+    tokenizer, groups, slots_per_page = load_template_info(template_path)
+    # Step 3: Collect all slices
+    all_slices = collect_all_slices(processed_sets, SLICE_SIZE)
+    # Step 4: Group slices into pages
+    page_slices, slices_per_page = group_slices_into_pages(all_slices, slots_per_page, SLICE_SIZE)
+    if not page_slices:
+        return
+    # Step 5: Create SVG pages
+    svg_pdf_pairs = create_svg_pages(page_slices, template_path, slots_per_page, ONEPIXEL, svg_dir)
+    # Step 6: Convert SVGs to PDFs
+    convert_svgs_to_pdfs(svg_pdf_pairs)
+    # Step 7: Merge PDFs
+    merge_pdfs(svg_pdf_pairs, output_dir)
 def main():
     parser = argparse.ArgumentParser(description="Create SVG card pages from image directories.")
     parser.add_argument("root", type=str, help="Root directory to search for images")
