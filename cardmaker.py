@@ -16,7 +16,8 @@ PLACEHOLDER_TEXT_COLOR = "#008080ff"
 MAX_IMAGE_DIM = 512
 VERSION = "0.1.0"
 
-csv.field_size_limit(sys.maxsize)
+# Restrict CSV fields to at most 1 GiB to avoid excessive memory usage
+csv.field_size_limit(1024 * 1024 * 1024)
 
 # cairo prec
 if os.name == 'nt':
