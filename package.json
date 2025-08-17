@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "test": "echo \"no tests\"",
-    "build:py": "uv run --python cpython3.12 pyinstaller cardmaker.py --onefile --name cardmaker --collect-binaries cairo --collect-all cairosvg --collect-all pywin32-ctypes --distpath .",
+    "build:py": "uv run --python cpython3.12 pyinstaller cardmaker.py --onefile --name cardmaker --collect-binaries cairo --collect-all cairosvg --collect-all pywin32-ctypes --distpath build/py --specpath build/py",
     "build:linux": "bun run build:py && node package-electron.js linux",
     "build:win": "bun run build:py && node package-electron.js win32"
   },

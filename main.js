@@ -19,7 +19,7 @@ function createWindow () {
 app.whenReady().then(() => {
   if (app.isPackaged) {
     const exe = process.platform === 'win32' ? 'cardmaker.exe' : 'cardmaker';
-    const bin = path.join(process.resourcesPath, exe);
+    const bin = path.join(process.resourcesPath, 'cardmaker', exe);
     const check = spawnSync(bin, ['--version']);
     if (check.error) {
       console.error('Failed to launch cardmaker:', check.error);
@@ -66,7 +66,7 @@ ipcMain.on('run-generation', (event, args) => {
   let proc;
   if (app.isPackaged) {
     const exe = process.platform === 'win32' ? 'cardmaker.exe' : 'cardmaker';
-    const bin = path.join(process.resourcesPath, exe);
+    const bin = path.join(process.resourcesPath, 'cardmaker', exe);
     proc = spawn(bin, [album, template, '--output-dir', outputDir]);
   } else {
     const script = path.join(__dirname, 'cardmaker.py');

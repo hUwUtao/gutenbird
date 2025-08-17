@@ -15,6 +15,7 @@ import re
 PLACEHOLDER_TEXT_COLOR = "#008080ff"
 MAX_IMAGE_DIM = 512
 VERSION = "0.1.0"
+DEFAULT_SLICE_SIZE = None
 
 # Restrict CSV fields to at most 1 GiB to avoid excessive memory usage
 csv.field_size_limit(1024 * 1024 * 1024)
@@ -23,6 +24,10 @@ csv.field_size_limit(1024 * 1024 * 1024)
 if os.name == 'nt':
     os.environ['PATH'] += ';C:\\Program Files\\GTK3-Runtime Win64\\bin'
 import cairosvg
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
 
 def process_image(image_path):
     """Convert an image to a square ratio with a white background and return its data URL, scaling to fit the largest dimension."""
@@ -195,7 +200,6 @@ def process_image_sets(image_sets, cache_path="./dist/.imgcache"):
     return processed_sets
 
 ONEPIXEL = "data:image/webp;base64,UklGRhYAAABXRUJQVlA4TAoAAAAvAAAAAEX/I/of"
-DEFAULT_SLICE_SIZE = 1
 
 def make_slices(images, slice_size, set_name):
     slices = []
@@ -207,7 +211,7 @@ def make_slices(images, slice_size, set_name):
         slices.append({"set": set_name, "items": chunk})
     return slices
 
-def discover_and_process_images(root_path, cache_path, slice_size, onepixel):
+def discover_and_process_images(root_path, cache_path, onepixel):
     image_sets = discover_image_sets(root_path)
     if not image_sets:
         print("\nNo image sets found!")
@@ -229,6 +233,8 @@ def load_template_info(template_path):
             slice_size = int(match.group(1))
     except Exception:
         pass
+    if slice_size is None:
+        slice_size = slots_per_page
     print(f"\nTemplate info:")
     print(f"- Cards per page: {slots_per_page}")
     print(f"- Slice size: {slice_size}")
@@ -300,7 +306,7 @@ def process_image_set(root_path, template_path, output_dir):
     os.makedirs(pdf_dir, exist_ok=True)
     cache_path = os.path.join(output_dir, ".imgcache")
     # Step 1: Discover and process images
-    processed_sets = discover_and_process_images(root_path, cache_path, DEFAULT_SLICE_SIZE, ONEPIXEL)
+    processed_sets = discover_and_process_images(root_path, cache_path, ONEPIXEL)
     if not processed_sets:
         return
     # Step 2: Load template info

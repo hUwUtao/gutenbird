@@ -21,15 +21,20 @@ const copyIfExists = (p) => {
 // Copy essential Electron files
 ['package.json', 'index.html', 'main.js', 'renderer.js', 'bun.lock', 'fonts'].forEach(copyIfExists);
 
-// Copy the bundled Python executable
+// Copy the bundled Python executable into a subdirectory
 const binary = platform === 'win32' ? 'cardmaker.exe' : 'cardmaker';
-copyIfExists(binary);
+const builtBinary = path.join(root, 'build', 'py', binary);
+if (fs.existsSync(builtBinary)) {
+  const destDir = path.join(buildDir, 'cardmaker');
+  fs.mkdirSync(destDir, { recursive: true });
+  fs.copyFileSync(builtBinary, path.join(destDir, binary));
+}
 
 // Install dependencies in the scoped directory
 execSync('bun install', { cwd: buildDir, stdio: 'inherit' });
 
 // Package the app using the scoped directory
-const extraResource = binary;
+const extraResource = path.join('cardmaker', binary);
 const outDir = path.join(root, 'dist');
 execSync(
   `npx electron-packager . gutenbird-studio --platform=${platform} --arch=x64 --out=${outDir} --overwrite --extra-resource ${extraResource}`,
