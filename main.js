@@ -58,7 +58,7 @@ ipcMain.on('run-generation', (event, args) => {
     const bin = path.join(process.resourcesPath, exe);
     proc = spawn(bin, [album, template, '--output-dir', outputDir]);
   } else {
-    const script = path.join(__dirname, '..', 'cardmaker.py');
+    const script = path.join(__dirname, 'cardmaker.py');
     proc = spawn('python', ['-u', script, album, template, '--output-dir', outputDir]);
   }
 

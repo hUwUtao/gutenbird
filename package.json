@@ -1,0 +1,17 @@
+{
+  "name": "gutenbird",
+  "version": "1.0.0",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"no tests\"",
+    "build:py": "uv run --python cpython3.12 pyinstaller cardmaker.py --onefile --name cardmaker --collect-binaries cairo --collect-all cairosvg --distpath .",
+    "build:linux": "bun run build:py && electron-packager . gutenbird-studio --platform=linux --arch=x64 --out=dist --overwrite --extra-resource cardmaker",
+    "build:win": "bun run build:py && electron-packager . gutenbird-studio --platform=win32 --arch=x64 --out=dist --overwrite --extra-resource cardmaker.exe"
+  },
+  "devDependencies": {
+    "electron": "^25.9.0",
+    "electron-packager": "^17.1.1"
+  }
+}
