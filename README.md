@@ -32,7 +32,7 @@ bun install
 bun run build:linux
 ```
 
-This produces a distributable under `dist/` with the bundled `cardmaker` executable.
+This produces a distributable under `dist/` with the bundled `cardmaker` executable. The build script references the PyInstaller output directly and packages the app with an [`asar`](https://www.electronjs.org/docs/latest/tutorial/asar-archives) archive for smaller, tamper‑resistant bundles.
 
 #### windows
 On a Windows host, run:
@@ -42,4 +42,4 @@ bun install
 bun run build:win
 ```
 
-The output appears in `dist/` and includes the bundled `cardmaker.exe`. PyInstaller pulls in the required `pywin32-ctypes` runtime automatically.
+The output appears in `dist/` and includes the bundled `cardmaker.exe`. PyInstaller pulls in the required `pywin32-ctypes` runtime automatically, and the package is produced with `asar` compression.
