@@ -55,7 +55,7 @@ ipcMain.handle('select-output', async () => {
 ipcMain.on('run-generation', (event, args) => {
   const { album, template, output } = args;
   const script = path.join(__dirname, '..', 'cardmaker.py');
-  const proc = spawn('python', [script, album, template, '--output-dir', output]);
+  const proc = spawn('python', ['-u', script, album, template, '--output-dir', output]);
 
   proc.stdout.on('data', (data) => {
     event.sender.send('generation-progress', data.toString());

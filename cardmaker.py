@@ -193,7 +193,7 @@ def process_image_sets(image_sets, cache_path="./dist/.imgcache"):
     return processed_sets
 
 ONEPIXEL = "data:image/webp;base64,UklGRhYAAABXRUJQVlA4TAoAAAAvAAAAAEX/I/of"
-SLICE_SIZE = 6
+DEFAULT_SLICE_SIZE = 1
 
 def make_slices(images, slice_size, set_name):
     slices = []
@@ -218,9 +218,19 @@ def load_template_info(template_path):
     tokenizer.parse_and_tokenize()
     groups = tokenizer.get_matched_groups()
     slots_per_page = len(groups)
+    slice_size = DEFAULT_SLICE_SIZE
+    try:
+        with open(template_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        match = re.search(r"\(slice=(\d+)\)", content)
+        if match:
+            slice_size = int(match.group(1))
+    except Exception:
+        pass
     print(f"\nTemplate info:")
     print(f"- Cards per page: {slots_per_page}")
-    return tokenizer, groups, slots_per_page
+    print(f"- Slice size: {slice_size}")
+    return tokenizer, groups, slots_per_page, slice_size
 
 def collect_all_slices(processed_sets, slice_size):
     all_slices = []
@@ -288,15 +298,15 @@ def process_image_set(root_path, template_path, output_dir):
     os.makedirs(pdf_dir, exist_ok=True)
     cache_path = os.path.join(output_dir, ".imgcache")
     # Step 1: Discover and process images
-    processed_sets = discover_and_process_images(root_path, cache_path, SLICE_SIZE, ONEPIXEL)
+    processed_sets = discover_and_process_images(root_path, cache_path, DEFAULT_SLICE_SIZE, ONEPIXEL)
     if not processed_sets:
         return
     # Step 2: Load template info
-    tokenizer, groups, slots_per_page = load_template_info(template_path)
+    tokenizer, groups, slots_per_page, slice_size = load_template_info(template_path)
     # Step 3: Collect all slices
-    all_slices = collect_all_slices(processed_sets, SLICE_SIZE)
+    all_slices = collect_all_slices(processed_sets, slice_size)
     # Step 4: Group slices into pages
-    page_slices, slices_per_page = group_slices_into_pages(all_slices, slots_per_page, SLICE_SIZE)
+    page_slices, slices_per_page = group_slices_into_pages(all_slices, slots_per_page, slice_size)
     if not page_slices:
         return
     # Step 5: Create SVG pages
