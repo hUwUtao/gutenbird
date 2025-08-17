@@ -7,5 +7,6 @@ requires-python = ">=3.8"
 dependencies = [
     "cairosvg>=2.7.1",
     "pillow>=10.4.0",
+    "pyinstaller>=6.15.0",
     "pypdf>=5.6.0",
 ]

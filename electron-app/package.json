@@ -6,7 +6,8 @@
   "scripts": {
     "start": "electron .",
     "test": "echo \"no tests\"",
-    "build:py": "pyinstaller ../cardmaker.py --onefile --name cardmaker --collect-binaries cairo --collect-all cairosvg --distpath .",
+    "build:py": "uv run --python python3 pyinstaller ../cardmaker.py --onefile --name cardmaker --collect-binaries cairo --collect-all cairosvg --distpath .",
+    "build:linux": "npm run build:py && electron-packager . gutenbird-studio --platform=linux --arch=x64 --out=dist --overwrite --extra-resource cardmaker",
     "build:win": "npm run build:py && electron-packager . gutenbird-studio --platform=win32 --arch=x64 --out=dist --overwrite --extra-resource cardmaker.exe"
   },
   "devDependencies": {
