@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Gutenbird UI</title>
+  <style>
+    body { font-family: sans-serif; margin: 1em; }
+    #previews { display: flex; gap: 1em; }
+    img { max-width: 45%; border: 1px solid #ccc; }
+    pre { height: 200px; overflow: auto; background: #f0f0f0; padding: 0.5em; }
+  </style>
+</head>
+<body>
+  <h1>Gutenbird UI</h1>
+  <div>
+    <button id="chooseTemplate">Select Template</button>
+    <span id="templatePath"></span>
+  </div>
+  <div>
+    <button id="chooseAlbum">Select Albums Folder</button>
+    <span id="albumPath"></span>
+  </div>
+  <div>
+    <button id="chooseOutput">Select Output Folder</button>
+    <span id="outputPath"></span>
+  </div>
+  <div id="previews">
+    <div>
+      <h3>Template Preview</h3>
+      <img id="templatePreview" />
+    </div>
+    <div>
+      <h3>Generated Preview</h3>
+      <img id="generatedPreview" />
+    </div>
+  </div>
+  <button id="generate">Generate</button>
+  <pre id="progress"></pre>
+  <button id="openOutput" style="display:none;">Open Output Folder</button>
+  <script src="renderer.js"></script>
+</body>
+</html>

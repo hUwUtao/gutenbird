@@ -1,0 +1,13 @@
+{
+  "name": "gutenbird-ui",
+  "version": "1.0.0",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"no tests\""
+  },
+  "devDependencies": {
+    "electron": "^25.9.0"
+  }
+}

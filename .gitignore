@@ -8,3 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Node-generated files
+node_modules/
+electron-app/node_modules/
