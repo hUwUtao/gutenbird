@@ -13,9 +13,9 @@ An Electron-based interface lives in `electron-app/` and lets you run the card g
 2. `npm install`
 3. `npm start`
 
+The right panel lets you choose a template and an album folder, and these selections are remembered between launches. After clicking **Generate**, progress logs stream in real time. When generation completes, switch to the **Output** tab on the left to preview any page from the `svg/` directory, and use **Save final.pdf** to pick where to copy the merged PDF.
+
 ### build for windows
 Run `npm run build:win` inside `electron-app` to generate a Windows package in `electron-app/dist/`.
-
-The UI allows you to pick a template and an albums folder, shows generation progress, previews the template and first generated page, and opens the output directory when finished.
 
 If your SVG template includes a marker like `(slice=6)`, the generator will use that value to decide how many images make up a slice. Without this marker, each slice defaults to a single image.

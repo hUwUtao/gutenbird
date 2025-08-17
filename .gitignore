@@ -12,3 +12,4 @@ wheels/
 # Node-generated files
 node_modules/
 electron-app/node_modules/
+electron-app/dist/

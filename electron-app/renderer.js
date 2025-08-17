@@ -1,42 +1,77 @@
 const { ipcRenderer } = require('electron');
 const path = require('path');
+const { pathToFileURL } = require('url');
 
 const templateBtn = document.getElementById('chooseTemplate');
 const albumBtn = document.getElementById('chooseAlbum');
-const outputBtn = document.getElementById('chooseOutput');
 const generateBtn = document.getElementById('generate');
-const openOutputBtn = document.getElementById('openOutput');
-const templatePreview = document.getElementById('templatePreview');
-const generatedPreview = document.getElementById('generatedPreview');
-const progress = document.getElementById('progress');
+const saveBtn = document.getElementById('saveFinal');
 
-let templatePath, albumPath, outputPath;
+const templatePreview = document.getElementById('templatePreview');
+const outputPreview = document.getElementById('outputPreview');
+const progress = document.getElementById('progress');
+const pageNumberInput = document.getElementById('pageNumber');
+const loadPageBtn = document.getElementById('loadPage');
+
+const tabs = document.querySelectorAll('.tab');
+const panes = document.querySelectorAll('.pane');
+
+let templatePath = localStorage.getItem('templatePath') || '';
+let albumPath = localStorage.getItem('albumPath') || '';
+let outputDir = null;
+
+if (templatePath) {
+  document.getElementById('templatePath').innerText = templatePath;
+  templatePreview.src = `file://${templatePath}`;
+}
+
+if (albumPath) {
+  document.getElementById('albumPath').innerText = albumPath;
+}
 
 templateBtn.addEventListener('click', async () => {
   templatePath = await ipcRenderer.invoke('select-template');
   document.getElementById('templatePath').innerText = templatePath || '';
   if (templatePath) {
     templatePreview.src = `file://${templatePath}`;
+    localStorage.setItem('templatePath', templatePath);
   }
 });
 
 albumBtn.addEventListener('click', async () => {
   albumPath = await ipcRenderer.invoke('select-album');
   document.getElementById('albumPath').innerText = albumPath || '';
+  if (albumPath) {
+    localStorage.setItem('albumPath', albumPath);
+  }
 });
 
-outputBtn.addEventListener('click', async () => {
-  outputPath = await ipcRenderer.invoke('select-output');
-  document.getElementById('outputPath').innerText = outputPath || '';
+function loadOutputPage(page) {
+  if (!outputDir) return;
+  const svgPath = path.join(outputDir, 'svg', `page_${String(page).padStart(3, '0')}.svg`);
+  outputPreview.src = pathToFileURL(svgPath).href;
+  pageNumberInput.value = page;
+}
+
+loadPageBtn.addEventListener('click', () => {
+  const p = parseInt(pageNumberInput.value, 10) || 1;
+  loadOutputPage(p);
 });
 
 generateBtn.addEventListener('click', () => {
-  if (!templatePath || !albumPath || !outputPath) {
-    alert('Please choose template, album and output folder');
+  if (!templatePath || !albumPath) {
+    alert('Please choose template and album');
     return;
   }
   progress.textContent = '';
-  ipcRenderer.send('run-generation', { album: albumPath, template: templatePath, output: outputPath });
+  saveBtn.disabled = true;
+  ipcRenderer.send('run-generation', { album: albumPath, template: templatePath });
+});
+
+saveBtn.addEventListener('click', async () => {
+  if (outputDir) {
+    await ipcRenderer.invoke('save-final', outputDir);
+  }
 });
 
 ipcRenderer.on('generation-progress', (_event, data) => {
@@ -46,11 +81,21 @@ ipcRenderer.on('generation-progress', (_event, data) => {
 
 ipcRenderer.on('generation-complete', (_event, { code, output }) => {
   if (code === 0) {
-    const svgPath = path.join(output, 'svg', 'page_001.svg');
-    generatedPreview.src = `file://${svgPath}`;
-    openOutputBtn.style.display = 'inline-block';
-    openOutputBtn.onclick = () => ipcRenderer.invoke('open-path', output);
+    outputDir = output;
+    saveBtn.disabled = false;
+    loadOutputPage(1);
   } else {
     alert('Generation failed. See output for details.');
   }
 });
+
+// tab switching
+for (const tab of tabs) {
+  tab.addEventListener('click', () => {
+    tabs.forEach(t => t.classList.remove('active'));
+    panes.forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    const pane = document.getElementById(tab.dataset.target);
+    pane.classList.add('active');
+  });
+}

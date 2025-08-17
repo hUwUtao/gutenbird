@@ -1,6 +1,7 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
+const fs = require('fs');
 
 function createWindow () {
   const win = new BrowserWindow({
@@ -44,18 +45,15 @@ ipcMain.handle('select-album', async () => {
   return filePaths[0];
 });
 
-ipcMain.handle('select-output', async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog({
-    properties: ['openDirectory', 'createDirectory']
-  });
-  if (canceled || filePaths.length === 0) return null;
-  return filePaths[0];
-});
+const outputDir = path.join(app.getPath('userData'), 'output');
 
 ipcMain.on('run-generation', (event, args) => {
-  const { album, template, output } = args;
+  const { album, template } = args;
+  if (fs.existsSync(outputDir)) {
+    fs.rmSync(outputDir, { recursive: true, force: true });
+  }
   const script = path.join(__dirname, '..', 'cardmaker.py');
-  const proc = spawn('python', ['-u', script, album, template, '--output-dir', output]);
+  const proc = spawn('python', ['-u', script, album, template, '--output-dir', outputDir]);
 
   proc.stdout.on('data', (data) => {
     event.sender.send('generation-progress', data.toString());
@@ -66,10 +64,16 @@ ipcMain.on('run-generation', (event, args) => {
   });
 
   proc.on('close', (code) => {
-    event.sender.send('generation-complete', { code, output });
+    event.sender.send('generation-complete', { code, output: outputDir });
   });
 });
 
-ipcMain.handle('open-path', async (_event, targetPath) => {
-  await shell.openPath(targetPath);
+ipcMain.handle('save-final', async () => {
+  const src = path.join(outputDir, 'final.pdf');
+  const { filePath, canceled } = await dialog.showSaveDialog({
+    defaultPath: 'final.pdf'
+  });
+  if (canceled || !filePath) return false;
+  await fs.promises.copyFile(src, filePath);
+  return true;
 });

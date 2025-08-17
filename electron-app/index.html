@@ -42,12 +42,51 @@
       margin-bottom: 20px;
     }
 
-    #previews {
+    #container {
       display: flex;
       gap: 20px;
     }
 
-    #previews img {
+    #leftPanel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #rightPanel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .tabs {
+      display: flex;
+      margin-bottom: 10px;
+    }
+
+    .tab {
+      flex: 1;
+      background: #333;
+      border: none;
+      padding: 8px 0;
+      cursor: pointer;
+    }
+
+    .tab.active {
+      background: #0e639c;
+    }
+
+    .pane {
+      display: none;
+      flex: 1;
+    }
+
+    .pane.active {
+      display: block;
+    }
+
+    #templatePreview,
+    #outputPreview {
       max-width: 100%;
       border: 1px solid #333;
       background: #1e1e1e;
@@ -62,38 +101,47 @@
       white-space: pre-wrap;
     }
 
-    #openOutput {
-      margin-top: 10px;
+    #pageControls {
+      margin-bottom: 10px;
     }
   </style>
 </head>
 <body>
   <h1>Gutenbird Studio</h1>
-  <div class="panel">
-    <button id="chooseTemplate">Select Template</button>
-    <span id="templatePath"></span>
-  </div>
-  <div class="panel">
-    <button id="chooseAlbum">Select Albums Folder</button>
-    <span id="albumPath"></span>
-  </div>
-  <div class="panel">
-    <button id="chooseOutput">Select Output Folder</button>
-    <span id="outputPath"></span>
-  </div>
-  <div id="previews" class="panel">
-    <div>
-      <h3>Template Preview</h3>
-      <img id="templatePreview" />
+  <div id="container">
+    <div id="leftPanel" class="panel">
+      <div class="tabs">
+        <button class="tab active" data-target="templatePane">Template</button>
+        <button class="tab" data-target="outputPane">Output</button>
+      </div>
+      <div id="templatePane" class="pane active">
+        <img id="templatePreview" />
+      </div>
+      <div id="outputPane" class="pane">
+        <div id="pageControls">
+          <label for="pageNumber">Page:</label>
+          <input type="number" id="pageNumber" min="1" value="1" />
+          <button id="loadPage">Load</button>
+        </div>
+        <img id="outputPreview" />
+      </div>
     </div>
-    <div>
-      <h3>Generated Preview</h3>
-      <img id="generatedPreview" />
+    <div id="rightPanel">
+      <div class="panel">
+        <button id="chooseTemplate">Select Template</button>
+        <span id="templatePath"></span>
+      </div>
+      <div class="panel">
+        <button id="chooseAlbum">Select Albums Folder</button>
+        <span id="albumPath"></span>
+      </div>
+      <div class="panel buttons">
+        <button id="generate">Generate</button>
+        <button id="saveFinal" disabled>Save final.pdf</button>
+      </div>
+      <pre id="progress" class="panel"></pre>
     </div>
   </div>
-  <button id="generate">Generate</button>
-  <pre id="progress" class="panel"></pre>
-  <button id="openOutput" style="display:none;">Open Output Folder</button>
   <script src="renderer.js"></script>
 </body>
 </html>
