@@ -3,10 +3,11 @@ name = "gutenbird"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "cairosvg>=2.7.1",
     "pillow>=10.4.0",
     "pyinstaller>=6.15.0",
     "pypdf>=5.6.0",
+    "pywin32-ctypes>=0.2.2; platform_system == 'Windows'",
 ]

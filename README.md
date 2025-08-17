@@ -5,6 +5,7 @@
 - uv
 - [GTKrt Windows](https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer/releases) or `libcairo`
 - bun
+- Python 3.12
 
 ## electron ui
 An Electron-based interface lives in this repository and lets you run the card generator without the command line.
@@ -41,4 +42,4 @@ bun install
 bun run build:win
 ```
 
-The output appears in `dist/` and includes the bundled `cardmaker.exe`.
+The output appears in `dist/` and includes the bundled `cardmaker.exe`. PyInstaller pulls in the required `pywin32-ctypes` runtime automatically.

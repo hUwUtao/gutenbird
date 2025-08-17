@@ -1,6 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 
 function createWindow () {
@@ -17,6 +17,17 @@ function createWindow () {
 }
 
 app.whenReady().then(() => {
+  if (app.isPackaged) {
+    const exe = process.platform === 'win32' ? 'cardmaker.exe' : 'cardmaker';
+    const bin = path.join(process.resourcesPath, exe);
+    const check = spawnSync(bin, ['--version']);
+    if (check.error) {
+      console.error('Failed to launch cardmaker:', check.error);
+    } else {
+      console.log(`cardmaker ${check.stdout.toString().trim()}`);
+    }
+  }
+
   createWindow();
 
   app.on('activate', function () {

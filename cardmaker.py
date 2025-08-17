@@ -14,6 +14,7 @@ import re
 
 PLACEHOLDER_TEXT_COLOR = "#008080ff"
 MAX_IMAGE_DIM = 512
+VERSION = "0.1.0"
 
 csv.field_size_limit(sys.maxsize)
 
@@ -317,6 +318,7 @@ def process_image_set(root_path, template_path, output_dir):
     merge_pdfs(svg_pdf_pairs, output_dir)
 def main():
     parser = argparse.ArgumentParser(description="Create SVG card pages from image directories.")
+    parser.add_argument("--version", action="version", version=f"cardmaker {VERSION}")
     parser.add_argument("root", type=str, help="Root directory to search for images")
     parser.add_argument("template", type=str, help="SVG template file to use")
     parser.add_argument("--output-dir", type=str, default="dist", help="Output directory for SVG files (default: dist)")
