@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Gutenbird Studio</title>
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #1e1e1e;
+      color: #e0e0e0;
+    }
+
+    h1 {
+      font-weight: 400;
+      margin-top: 0;
+      margin-bottom: 20px;
+    }
+
+    button {
+      background: #0e639c;
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #1177bb;
+    }
+
+    button:disabled {
+      background: #555;
+    }
+
+    .panel {
+      background: #252526;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+
+    #container {
+      display: flex;
+      gap: 20px;
+    }
+
+    #leftPanel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #rightPanel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .tabs {
+      display: flex;
+      margin-bottom: 10px;
+    }
+
+    .tab {
+      flex: 1;
+      background: #333;
+      border: none;
+      padding: 8px 0;
+      cursor: pointer;
+    }
+
+    .tab.active {
+      background: #0e639c;
+    }
+
+    .pane {
+      display: none;
+      flex: 1;
+    }
+
+    .pane.active {
+      display: block;
+    }
+
+    #templatePreview,
+    #outputPreview {
+      max-width: 100%;
+      border: 1px solid #333;
+      background: #1e1e1e;
+    }
+
+    #progress {
+      height: 200px;
+      overflow: auto;
+      background: #1e1e1e;
+      border: 1px solid #333;
+      padding: 10px;
+      white-space: pre-wrap;
+    }
+
+    #pageControls {
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Gutenbird Studio</h1>
+  <div id="container">
+    <div id="leftPanel" class="panel">
+      <div class="tabs">
+        <button class="tab active" data-target="templatePane">Template</button>
+        <button class="tab" data-target="outputPane">Output</button>
+      </div>
+      <div id="templatePane" class="pane active">
+        <img id="templatePreview" />
+      </div>
+      <div id="outputPane" class="pane">
+        <div id="pageControls">
+          <label for="pageNumber">Page:</label>
+          <input type="number" id="pageNumber" min="1" value="1" />
+          <button id="loadPage">Load</button>
+        </div>
+        <img id="outputPreview" />
+      </div>
+    </div>
+    <div id="rightPanel">
+      <div class="panel">
+        <button id="chooseTemplate">Select Template</button>
+        <span id="templatePath"></span>
+      </div>
+      <div class="panel">
+        <button id="chooseAlbum">Select Albums Folder</button>
+        <span id="albumPath"></span>
+      </div>
+      <div class="panel buttons">
+        <button id="generate">Generate</button>
+        <button id="saveFinal" disabled>Save final.pdf</button>
+      </div>
+      <pre id="progress" class="panel"></pre>
+    </div>
+  </div>
+  <script src="renderer.js"></script>
+</body>
+</html>

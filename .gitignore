@@ -8,3 +8,10 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Node-generated files
+node_modules/
+cardmaker
+cardmaker.exe
+cardmaker.spec
+package-lock.json
