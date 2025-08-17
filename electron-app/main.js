@@ -52,8 +52,15 @@ ipcMain.on('run-generation', (event, args) => {
   if (fs.existsSync(outputDir)) {
     fs.rmSync(outputDir, { recursive: true, force: true });
   }
-  const script = path.join(__dirname, '..', 'cardmaker.py');
-  const proc = spawn('python', ['-u', script, album, template, '--output-dir', outputDir]);
+  let proc;
+  if (app.isPackaged) {
+    const exe = process.platform === 'win32' ? 'cardmaker.exe' : 'cardmaker';
+    const bin = path.join(process.resourcesPath, exe);
+    proc = spawn(bin, [album, template, '--output-dir', outputDir]);
+  } else {
+    const script = path.join(__dirname, '..', 'cardmaker.py');
+    proc = spawn('python', ['-u', script, album, template, '--output-dir', outputDir]);
+  }
 
   proc.stdout.on('data', (data) => {
     event.sender.send('generation-progress', data.toString());

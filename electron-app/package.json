@@ -6,7 +6,8 @@
   "scripts": {
     "start": "electron .",
     "test": "echo \"no tests\"",
-    "build:win": "electron-packager . gutenbird-studio --platform=win32 --arch=x64 --out=dist --overwrite"
+    "build:py": "pyinstaller ../cardmaker.py --onefile --name cardmaker --collect-binaries cairo --collect-all cairosvg --distpath .",
+    "build:win": "npm run build:py && electron-packager . gutenbird-studio --platform=win32 --arch=x64 --out=dist --overwrite --extra-resource cardmaker.exe"
   },
   "devDependencies": {
     "electron": "^25.9.0",
