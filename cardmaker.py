@@ -256,6 +256,90 @@ def group_slices_into_pages(all_slices, slots_per_page, slice_size):
     print(f"- {sum(len(slice['items']) for slice in all_slices)} images split into {len(all_slices)} slices, {len(page_slices)} pages")
     return page_slices, slices_per_page
 
+
+def collect_parity_slices(processed_sets, slice_size, parity, placeholder):
+    """Collect slices using parity layout.
+
+    Each slice pulls one item from a group of sets equal to ``slice_size``. Items
+    are selected at positions ``p + k*parity`` for each parity ``p``.
+    """
+    sets = list(processed_sets.items())
+    while len(sets) % slice_size != 0:
+        sets.append((None, []))  # pad with empty sets
+    grouped = [sets[i:i + slice_size] for i in range(0, len(sets), slice_size)]
+    group_max = [max(len(images) for _, images in group) for group in grouped]
+
+    parity_slices = [[] for _ in range(parity)]
+    for p_idx in range(parity):
+        offset = 0
+        while True:
+            pos = p_idx + offset * parity
+            any_added = False
+            for group_idx, group in enumerate(grouped):
+                max_len = group_max[group_idx]
+                if pos >= max_len:
+                    continue
+                any_added = True
+                slice_items = []
+                set_names = []
+                for set_name, images in group:
+                    if set_name is not None:
+                        set_names.append(set_name)
+                    if pos < len(images):
+                        slice_items.append(images[pos])
+                    else:
+                        slice_items.append({"label": "", "image": placeholder})
+                parity_slices[p_idx].append({
+                    "set": "+".join(set_names),
+                    "items": slice_items,
+                })
+            if not any_added:
+                break
+            offset += 1
+    return parity_slices
+
+
+def group_parity_slices_into_pages(parity_slices, slots_per_page, slice_size, parity, lock_cells=False):
+    """Arrange parity slices into page groups.
+
+    When ``lock_cells`` is True, slices from all parities are interleaved by
+    position so that each set occupies the same cell index across pages. The
+    default behaviour groups pages per parity without enforcing cell
+    consistency.
+    """
+    slices_per_page = slots_per_page // slice_size
+    if slices_per_page == 0:
+        print(f"Template has too few groups for slice size {slice_size}!")
+        return None
+
+    pages = []
+    if lock_cells:
+        # Interleave slices by position across parities
+        max_len = max(len(lst) for lst in parity_slices)
+        interleaved = []
+        for idx in range(max_len):
+            for p_idx in range(parity):
+                lst = parity_slices[p_idx]
+                if idx < len(lst):
+                    interleaved.append(lst[idx])
+        for i in range(0, len(interleaved), slices_per_page):
+            pages.append(interleaved[i:i + slices_per_page])
+    else:
+        parity_lists = [list(lst) for lst in parity_slices]
+        while any(parity_lists):
+            for p_idx in range(parity):
+                lst = parity_lists[p_idx]
+                if not lst:
+                    continue
+                page_slice_group = lst[:slices_per_page]
+                parity_lists[p_idx] = lst[slices_per_page:]
+                pages.append(page_slice_group)
+
+    total_images = sum(len(slice_["items"]) for group in parity_slices for slice_ in group)
+    total_slices = sum(len(group) for group in parity_slices)
+    print(f"- {total_images} images split into {total_slices} slices, {len(pages)} pages")
+    return pages
+
 def create_svg_pages(page_slices, template_path, slots_per_page, onepixel, svg_dir):
     svg_pdf_pairs = []
     page_counter = 1
@@ -299,7 +383,7 @@ def merge_pdfs(svg_pdf_pairs, output_dir):
         writer.write(out_f)
     print(f"Merged {len(pdf_files)} PDFs into {final_pdf_path}")
 
-def process_image_set(root_path, template_path, output_dir):
+def process_image_set(root_path, template_path, output_dir, parity=1, lock_cells=False):
     svg_dir = os.path.join(output_dir, "svg")
     pdf_dir = os.path.join(output_dir, "pdf")
     os.makedirs(svg_dir, exist_ok=True)
@@ -311,10 +395,15 @@ def process_image_set(root_path, template_path, output_dir):
         return
     # Step 2: Load template info
     tokenizer, groups, slots_per_page, slice_size = load_template_info(template_path)
-    # Step 3: Collect all slices
-    all_slices = collect_all_slices(processed_sets, slice_size)
-    # Step 4: Group slices into pages
-    page_slices, slices_per_page = group_slices_into_pages(all_slices, slots_per_page, slice_size)
+    # Step 3/4: Layout slices into pages
+    if parity > 1:
+        parity_slices = collect_parity_slices(processed_sets, slice_size, parity, ONEPIXEL)
+        page_slices = group_parity_slices_into_pages(
+            parity_slices, slots_per_page, slice_size, parity, lock_cells
+        )
+    else:
+        all_slices = collect_all_slices(processed_sets, slice_size)
+        page_slices, _ = group_slices_into_pages(all_slices, slots_per_page, slice_size)
     if not page_slices:
         return
     # Step 5: Create SVG pages
@@ -329,9 +418,21 @@ def main():
     parser.add_argument("root", type=str, help="Root directory to search for images")
     parser.add_argument("template", type=str, help="SVG template file to use")
     parser.add_argument("--output-dir", type=str, default="dist", help="Output directory for SVG files (default: dist)")
+    parser.add_argument("--parity", type=int, default=1, help="Parity grouping value")
+    parser.add_argument(
+        "--lock-cells",
+        action="store_true",
+        help="Keep each set in a fixed cell position across parity pages",
+    )
     args = parser.parse_args()
 
-    process_image_set(args.root, args.template, args.output_dir)
+    process_image_set(
+        args.root,
+        args.template,
+        args.output_dir,
+        parity=args.parity,
+        lock_cells=args.lock_cells,
+    )
 
 if __name__ == "__main__":
     main()
