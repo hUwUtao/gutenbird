@@ -95,12 +95,19 @@ def get_image_cache_csv(cache_path):
             with gzip.open(cache_path, 'rt', encoding='utf-8', newline='') as f:
                 reader = csv.reader(f)
                 for row in reader:
-                    if len(row) == 3:
-                        file_path, mtime, data_url = row
-                        cache_key = f"{file_path}|{mtime}"
-                        cache[cache_key] = data_url
-                f.flush()
-                f.close()
+                    if len(row) != 3:
+                        continue
+                    file_path, mtime_str, data_url = row
+                    if not file_path:
+                        continue
+                    try:
+                        mtime = int(mtime_str)
+                    except (TypeError, ValueError):
+                        try:
+                            mtime = int(round(float(mtime_str) * 1000))
+                        except (TypeError, ValueError):
+                            mtime = None
+                    cache[file_path] = (mtime, data_url)
         except Exception as e:
             print(f"Failed to read image cache: {e}")
             exit(1)
@@ -123,21 +130,28 @@ def wal_writer_thread(cache_path, wal_queue, stop_event):
                 if entry is None:
                     break
                 file_path, mtime, data_url = entry
-                csv_writer.writerow([file_path, mtime, data_url])
+                mtime_value = '' if mtime is None else str(mtime)
+                csv_writer.writerow([file_path, mtime_value, data_url])
+                f.flush()
                 wal_queue.task_done()
             except queue.Empty:
                 continue
 
-def process_image_with_cache(image_path, cache, cache_path, wal_queue=None):
+def get_normalized_mtime(image_path):
     try:
-        mtime = os.path.getmtime(image_path)
+        return int(round(os.path.getmtime(image_path) * 1000))
     except Exception:
-        mtime = None
-    cache_key = f"{image_path}|{mtime}"
-    if cache_key in cache:
-        return cache[cache_key]
+        return None
+
+def process_image_with_cache(image_path, cache, cache_path, wal_queue=None):
+    mtime = get_normalized_mtime(image_path)
+    cache_entry = cache.get(image_path)
+    if cache_entry is not None:
+        cached_mtime, data_url = cache_entry
+        if cached_mtime == mtime:
+            return data_url
     data_url = process_image(image_path)
-    cache[cache_key] = data_url
+    cache[image_path] = (mtime, data_url)
     if wal_queue is not None:
         wal_queue.put((image_path, mtime, data_url))
     # else:
