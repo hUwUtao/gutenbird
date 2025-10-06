@@ -19,7 +19,6 @@ const pageIndicators = document.getElementById('pageIndicators');
 const pageStatus = document.getElementById('pageStatus');
 const outputLoading = document.getElementById('outputLoading');
 const parityInput = document.getElementById('parityInput');
-const lockCellsToggle = document.getElementById('lockCellsToggle');
 const templatePathLabel = document.getElementById('templatePath');
 const albumPathLabel = document.getElementById('albumPath');
 const outputPathLabel = document.getElementById('outputPath');
@@ -63,9 +62,6 @@ let parity = parseInt(localStorage.getItem('parity') || '1', 10);
 if (!Number.isInteger(parity) || parity < 1) parity = 1;
 parityInput.value = parity;
 
-const lockPref = localStorage.getItem('lockCells');
-const lockCells = lockPref === 'true';
-lockCellsToggle.checked = lockCells;
 
 function setLoadingOverlay(active, total = null) {
   if (!outputLoading) return;
@@ -306,17 +302,12 @@ parityInput.addEventListener('change', () => {
   localStorage.setItem('parity', String(value));
 });
 
-lockCellsToggle.addEventListener('change', () => {
-  localStorage.setItem('lockCells', lockCellsToggle.checked ? 'true' : 'false');
-});
-
 generateBtn.addEventListener('click', () => {
   if (!templatePath || !albumPath) {
     alert('Please choose a template and an albums folder.');
     return;
   }
   const parityValue = Math.max(1, parseInt(parityInput.value, 10) || 1);
-  const lockValue = lockCellsToggle.checked;
   clearProgress();
   saveBtn.disabled = true;
   generateBtn.disabled = true;
@@ -328,7 +319,6 @@ generateBtn.addEventListener('click', () => {
     album: albumPath,
     template: templatePath,
     parity: parityValue,
-    lockCells: lockValue,
     outputDir: customOutputDir || null,
   });
 });

@@ -168,7 +168,6 @@ ipcMain.on('run-generation', (event, args) => {
     album,
     template,
     parity = 1,
-    lockCells = false,
     outputDir: requestedOutput,
   } = args;
 
@@ -219,9 +218,6 @@ ipcMain.on('run-generation', (event, args) => {
     '--metadata-json',
     metadataPath,
   ];
-  if (lockCells) {
-    cliArgs.push('--lock-cells');
-  }
 
   const resolved = resolveCardmakerExecutable();
   let proc;

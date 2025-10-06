@@ -3,6 +3,9 @@ import sys
 import argparse
 import base64
 import json
+import math
+import random
+from dataclasses import dataclass
 from PIL import Image
 import io
 import bird
@@ -216,6 +219,51 @@ def process_image_sets(image_sets, cache_path="./dist/.imgcache"):
 
 ONEPIXEL = "data:image/webp;base64,UklGRhYAAABXRUJQVlA4TAoAAAAvAAAAAEX/I/of"
 
+
+@dataclass
+class PagePlan:
+    """Represents a fully expanded page ready to be rendered."""
+
+    items: list  # length equals slots_per_page
+    sets: list   # metadata for logging/debugging
+
+
+def chunked(seq, size):
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
+
+def parse_testmode_spec(spec):
+    """Parse ``<sets>:<min>,<max>`` into integers."""
+    try:
+        sets_part, cards_part = spec.split(":", 1)
+        min_part, max_part = cards_part.split(",", 1)
+        set_count = int(sets_part)
+        min_cards = int(min_part)
+        max_cards = int(max_part)
+    except ValueError as exc:  # pragma: no cover - guard against programming slip
+        raise ValueError("Expected format <sets>:<min>,<max>") from exc
+
+    if set_count <= 0:
+        raise ValueError("Set count must be greater than zero")
+    if min_cards < 0 or max_cards < min_cards:
+        raise ValueError("Card range must satisfy 0 <= min <= max")
+    return set_count, min_cards, max_cards
+
+
+def generate_test_sets(set_count, min_cards, max_cards, placeholder, rng=None):
+    """Create synthetic sets for test mode."""
+    rng = rng or random.Random()
+    processed_sets = {}
+    for idx in range(set_count):
+        card_total = rng.randint(min_cards, max_cards)
+        items = []
+        for card_idx in range(card_total):
+            label = f"s{idx + 1}c{card_idx + 1}"
+            items.append({"label": label, "image": placeholder})
+        processed_sets[f"set{idx + 1}"] = items
+    return processed_sets
+
 def make_slices(images, slice_size, set_name):
     slices = []
     for i in range(0, len(images), slice_size):
@@ -273,72 +321,7 @@ def collect_all_slices(processed_sets, slice_size):
         all_slices.extend(slices)
     return all_slices
 
-def group_slices_into_pages(all_slices, slots_per_page, slice_size, stats=None):
-    slices_per_page = slots_per_page // slice_size
-    if slices_per_page == 0:
-        print(f"Template has too few groups for slice size {slice_size}!")
-        if stats is not None:
-            stats["status"] = "error"
-            stats["error"] = f"Template has too few groups for slice size {slice_size}."
-        return None, 0
-    page_slices = [all_slices[i:i+slices_per_page] for i in range(0, len(all_slices), slices_per_page)]
-    print(f"- {sum(len(slice['items']) for slice in all_slices)} images split into {len(all_slices)} slices, {len(page_slices)} pages")
-    if stats is not None:
-        stats["slices"] = len(all_slices)
-        stats["page_count"] = len(page_slices)
-    return page_slices, slices_per_page
-
-
-def collect_parity_slices(processed_sets, slice_size, parity, placeholder):
-    """Collect slices using parity layout.
-
-    Each slice pulls one item from a group of sets equal to ``slice_size``. Items
-    are selected at positions ``p + k*parity`` for each parity ``p``.
-    """
-    sets = list(processed_sets.items())
-    while len(sets) % slice_size != 0:
-        sets.append((None, []))  # pad with empty sets
-    grouped = [sets[i:i + slice_size] for i in range(0, len(sets), slice_size)]
-    group_max = [max(len(images) for _, images in group) for group in grouped]
-
-    parity_slices = [[] for _ in range(parity)]
-    for p_idx in range(parity):
-        offset = 0
-        while True:
-            pos = p_idx + offset * parity
-            any_added = False
-            for group_idx, group in enumerate(grouped):
-                max_len = group_max[group_idx]
-                if pos >= max_len:
-                    continue
-                any_added = True
-                slice_items = []
-                set_names = []
-                for set_name, images in group:
-                    if set_name is not None:
-                        set_names.append(set_name)
-                    if pos < len(images):
-                        slice_items.append(images[pos])
-                    else:
-                        slice_items.append({"label": "", "image": placeholder})
-                parity_slices[p_idx].append({
-                    "set": "+".join(set_names),
-                    "items": slice_items,
-                })
-            if not any_added:
-                break
-            offset += 1
-    return parity_slices
-
-
-def group_parity_slices_into_pages(parity_slices, slots_per_page, slice_size, parity, lock_cells=False, stats=None):
-    """Arrange parity slices into page groups.
-
-    When ``lock_cells`` is True, slices from all parities are interleaved by
-    position so that each set occupies the same cell index across pages. The
-    default behaviour groups pages per parity without enforcing cell
-    consistency.
-    """
+def group_slices_into_pages(all_slices, slots_per_page, slice_size, placeholder, stats=None):
     slices_per_page = slots_per_page // slice_size
     if slices_per_page == 0:
         print(f"Template has too few groups for slice size {slice_size}!")
@@ -347,50 +330,94 @@ def group_parity_slices_into_pages(parity_slices, slots_per_page, slice_size, pa
             stats["error"] = f"Template has too few groups for slice size {slice_size}."
         return None
 
-    pages = []
-    if lock_cells:
-        # Interleave slices by position across parities
-        max_len = max(len(lst) for lst in parity_slices)
-        interleaved = []
-        for idx in range(max_len):
-            for p_idx in range(parity):
-                lst = parity_slices[p_idx]
-                if idx < len(lst):
-                    interleaved.append(lst[idx])
-        for i in range(0, len(interleaved), slices_per_page):
-            pages.append(interleaved[i:i + slices_per_page])
-    else:
-        parity_lists = [list(lst) for lst in parity_slices]
-        while any(parity_lists):
-            for p_idx in range(parity):
-                lst = parity_lists[p_idx]
-                if not lst:
-                    continue
-                page_slice_group = lst[:slices_per_page]
-                parity_lists[p_idx] = lst[slices_per_page:]
-                pages.append(page_slice_group)
+    page_plans = []
+    for slice_group in chunked(all_slices, slices_per_page):
+        items = [item for slice_ in slice_group for item in slice_["items"]]
+        if len(items) < slots_per_page:
+            items = items + ([{"label": "", "image": placeholder}] * (slots_per_page - len(items)))
+        sets = [slice_["set"] for slice_ in slice_group]
+        page_plans.append(PagePlan(items=items, sets=sets))
 
-    total_images = sum(len(slice_["items"]) for group in parity_slices for slice_ in group)
-    total_slices = sum(len(group) for group in parity_slices)
-    print(f"- {total_images} images split into {total_slices} slices, {len(pages)} pages")
+    print(
+        f"- {sum(len(slice_['items']) for slice_ in all_slices)} items arranged into "
+        f"{len(all_slices)} slices, producing {len(page_plans)} pages"
+    )
     if stats is not None:
-        stats["slices"] = total_slices
-        stats["page_count"] = len(pages)
-    return pages
+        stats["slices"] = len(all_slices)
+        stats["page_count"] = len(page_plans)
+    return page_plans
 
-def create_svg_pages(page_slices, template_path, slots_per_page, onepixel, svg_dir, stats=None):
+
+def build_parity_page_plans(processed_sets, slots_per_page, parity, placeholder, stats=None):
+    if parity <= 1:
+        raise ValueError("Parity layout requires parity > 1")
+
+    if slots_per_page % parity != 0:
+        print(
+            f"Template with {slots_per_page} slots cannot be split into {parity} parity "
+            "segments."
+        )
+        if stats is not None:
+            stats["status"] = "error"
+            stats["error"] = (
+                f"Slots per page ({slots_per_page}) must be divisible by parity ({parity})."
+            )
+        return None
+
+    cells_per_page = slots_per_page // parity
+    ordered_sets = list(processed_sets.items())
+    total_cards = sum(len(images) for _, images in ordered_sets)
+    page_plans = []
+    parity_groups = 0
+
+    for group in chunked(ordered_sets, cells_per_page):
+        parity_groups += 1
+        padded_group = list(group) + [(None, [])] * (cells_per_page - len(group))
+        group_sets = [name for name, _ in group]
+        max_len = max((len(images) for _, images in group), default=0)
+        if max_len == 0:
+            continue
+        limit = math.ceil(max_len / parity)
+        if limit <= 0:
+            continue
+        for page_idx in range(limit):
+            page_items = []
+            for parity_idx in range(parity):
+                card_offset = parity_idx * limit
+                for set_name, images in padded_group:
+                    card_index = page_idx + card_offset
+                    if set_name is not None and card_index < len(images):
+                        page_items.append(images[card_index])
+                    else:
+                        page_items.append({"label": "", "image": placeholder})
+            page_plans.append(PagePlan(items=page_items, sets=group_sets))
+
+    print(
+        f"- {total_cards} items across {len(ordered_sets)} sets, producing "
+        f"{len(page_plans)} parity pages"
+    )
+    if stats is not None:
+        stats["cells_per_page"] = cells_per_page
+        stats["parity_groups"] = parity_groups
+        stats["page_count"] = len(page_plans)
+    return page_plans
+
+def create_svg_pages(page_plans, template_path, slots_per_page, onepixel, svg_dir, stats=None):
     svg_pdf_pairs = []
     page_counter = 1
     pages_meta = [] if stats is not None else None
-    for page_idx, slice_group in enumerate(page_slices):
+    for page_idx, plan in enumerate(page_plans):
         tokenizer = bird.SVGTokenizer(template_path)
         tokenizer.parse_and_tokenize()
         groups = tokenizer.get_matched_groups()
-        page_items = [item for slice_ in slice_group for item in slice_["items"]]
+        page_items = list(plan.items)
         if len(page_items) < slots_per_page:
             page_items += [{"label": "", "image": onepixel}] * (slots_per_page - len(page_items))
-        set_names = [slice_["set"] for slice_ in slice_group]
-        print(f"\nCreating page {page_idx+1}/{len(page_slices)} with {len(page_items)} items from sets: {set_names}")
+        set_names = plan.sets
+        print(
+            f"\nCreating page {page_idx + 1}/{len(page_plans)} with {len(page_items)} items "
+            f"from sets: {set_names}"
+        )
         for idx, item in enumerate(page_items):
             tokenizer.modify_group_labels(idx, filter_label(item["label"]))
             tokenizer.modify_group_images(idx, item["image"])
@@ -434,11 +461,10 @@ def merge_pdfs(svg_pdf_pairs, output_dir):
     print(f"Merged {len(pdf_files)} PDFs into {final_pdf_path}")
     return final_pdf_path
 
-def process_image_set(root_path, template_path, output_dir, parity=1, lock_cells=False, stats=None):
+def process_image_set(root_path, template_path, output_dir, parity=1, stats=None, testmode=None):
     stats = stats or {}
     stats["version"] = VERSION
     stats["parity"] = parity
-    stats["lock_cells"] = bool(lock_cells)
     stats["output_dir"] = os.path.abspath(output_dir)
     stats["album_root"] = os.path.abspath(root_path)
     stats["template"] = os.path.abspath(template_path)
@@ -449,32 +475,60 @@ def process_image_set(root_path, template_path, output_dir, parity=1, lock_cells
     stats["svg_dir"] = os.path.abspath(svg_dir)
     stats["pdf_dir"] = os.path.abspath(pdf_dir)
     cache_path = os.path.join(output_dir, ".imgcache")
-    # Step 1: Discover and process images
-    processed_sets = discover_and_process_images(root_path, cache_path, ONEPIXEL, stats=stats)
+    # Step 1: Discover and process images or synthesize test sets
+    if testmode is not None:
+        set_count, min_cards, max_cards = testmode
+        stats["testmode"] = {
+            "sets": set_count,
+            "min_cards": min_cards,
+            "max_cards": max_cards,
+        }
+        processed_sets = generate_test_sets(
+            set_count,
+            min_cards,
+            max_cards,
+            ONEPIXEL,
+        )
+        stats["sets"] = len(processed_sets)
+        stats["images"] = sum(len(images) for images in processed_sets.values())
+    else:
+        processed_sets = discover_and_process_images(root_path, cache_path, ONEPIXEL, stats=stats)
     if not processed_sets:
         return stats
     # Step 2: Load template info
-    tokenizer, groups, slots_per_page, slice_size = load_template_info(template_path, stats=stats)
+    _, _, slots_per_page, slice_size = load_template_info(template_path, stats=stats)
     stats["status"] = "processing"
     # Step 3/4: Layout slices into pages
+    rows_per_page = slots_per_page // slice_size if slice_size else 0
+    stats["rows_per_page"] = rows_per_page
+
     if parity > 1:
-        parity_slices = collect_parity_slices(processed_sets, slice_size, parity, ONEPIXEL)
-        page_slices = group_parity_slices_into_pages(
-            parity_slices, slots_per_page, slice_size, parity, lock_cells, stats=stats
+        page_plans = build_parity_page_plans(
+            processed_sets,
+            slots_per_page,
+            parity,
+            ONEPIXEL,
+            stats=stats,
         )
         stats["layout"] = "parity"
     else:
         all_slices = collect_all_slices(processed_sets, slice_size)
-        page_slices, _ = group_slices_into_pages(all_slices, slots_per_page, slice_size, stats=stats)
+        page_plans = group_slices_into_pages(
+            all_slices,
+            slots_per_page,
+            slice_size,
+            ONEPIXEL,
+            stats=stats,
+        )
         stats["layout"] = "sequential"
     if stats.get("status") == "error":
         return stats
-    if not page_slices:
+    if not page_plans:
         stats["status"] = "error"
         stats["error"] = "No pages produced."
         return stats
     # Step 5: Create SVG pages
-    svg_pdf_pairs = create_svg_pages(page_slices, template_path, slots_per_page, ONEPIXEL, svg_dir, stats=stats)
+    svg_pdf_pairs = create_svg_pages(page_plans, template_path, slots_per_page, ONEPIXEL, svg_dir, stats=stats)
     # Step 6: Convert SVGs to PDFs
     convert_svgs_to_pdfs(svg_pdf_pairs)
     # Step 7: Merge PDFs
@@ -492,11 +546,6 @@ def main():
     parser.add_argument("--output-dir", type=str, default="dist", help="Output directory for SVG files (default: dist)")
     parser.add_argument("--parity", type=int, default=1, help="Parity grouping value")
     parser.add_argument(
-        "--lock-cells",
-        action="store_true",
-        help="Keep each set in a fixed cell position across parity pages",
-    )
-    parser.add_argument(
         "--metadata-json",
         type=str,
         default=None,
@@ -507,14 +556,28 @@ def main():
         action="store_true",
         help="Emit generation metadata as JSON to stdout.",
     )
+    parser.add_argument(
+        "--testmode",
+        type=str,
+        default=None,
+        help="Generate synthetic card sets: <sets>:<min>,<max>",
+    )
     args = parser.parse_args()
+
+    testmode_spec = None
+    if args.testmode:
+        try:
+            testmode_spec = parse_testmode_spec(args.testmode)
+        except ValueError as exc:
+            print(f"Invalid --testmode value: {exc}")
+            return 1
 
     stats = process_image_set(
         args.root,
         args.template,
         args.output_dir,
         parity=args.parity,
-        lock_cells=args.lock_cells,
+        testmode=testmode_spec,
     )
     if args.metadata_json:
         metadata_dir = os.path.dirname(os.path.abspath(args.metadata_json))
