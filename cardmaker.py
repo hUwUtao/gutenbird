@@ -2,6 +2,7 @@ import os
 import sys
 import argparse
 import base64
+import json
 from PIL import Image
 import io
 import bird
@@ -211,15 +212,23 @@ def make_slices(images, slice_size, set_name):
         slices.append({"set": set_name, "items": chunk})
     return slices
 
-def discover_and_process_images(root_path, cache_path, onepixel):
+def discover_and_process_images(root_path, cache_path, onepixel, stats=None):
     image_sets = discover_image_sets(root_path)
     if not image_sets:
         print("\nNo image sets found!")
+        if stats is not None:
+            stats["sets"] = 0
+            stats["images"] = 0
+            stats["status"] = "error"
+            stats["error"] = "No image sets found."
         return None
     processed_sets = process_image_sets(image_sets, cache_path=cache_path)
+    if stats is not None:
+        stats["sets"] = len(processed_sets)
+        stats["images"] = sum(len(images) for images in processed_sets.values())
     return processed_sets
 
-def load_template_info(template_path):
+def load_template_info(template_path, stats=None):
     tokenizer = bird.SVGTokenizer(template_path)
     tokenizer.parse_and_tokenize()
     groups = tokenizer.get_matched_groups()
@@ -238,6 +247,9 @@ def load_template_info(template_path):
     print(f"\nTemplate info:")
     print(f"- Cards per page: {slots_per_page}")
     print(f"- Slice size: {slice_size}")
+    if stats is not None:
+        stats["slots_per_page"] = slots_per_page
+        stats["slice_size"] = slice_size
     return tokenizer, groups, slots_per_page, slice_size
 
 def collect_all_slices(processed_sets, slice_size):
@@ -247,13 +259,19 @@ def collect_all_slices(processed_sets, slice_size):
         all_slices.extend(slices)
     return all_slices
 
-def group_slices_into_pages(all_slices, slots_per_page, slice_size):
+def group_slices_into_pages(all_slices, slots_per_page, slice_size, stats=None):
     slices_per_page = slots_per_page // slice_size
     if slices_per_page == 0:
         print(f"Template has too few groups for slice size {slice_size}!")
+        if stats is not None:
+            stats["status"] = "error"
+            stats["error"] = f"Template has too few groups for slice size {slice_size}."
         return None, 0
     page_slices = [all_slices[i:i+slices_per_page] for i in range(0, len(all_slices), slices_per_page)]
     print(f"- {sum(len(slice['items']) for slice in all_slices)} images split into {len(all_slices)} slices, {len(page_slices)} pages")
+    if stats is not None:
+        stats["slices"] = len(all_slices)
+        stats["page_count"] = len(page_slices)
     return page_slices, slices_per_page
 
 
@@ -299,7 +317,7 @@ def collect_parity_slices(processed_sets, slice_size, parity, placeholder):
     return parity_slices
 
 
-def group_parity_slices_into_pages(parity_slices, slots_per_page, slice_size, parity, lock_cells=False):
+def group_parity_slices_into_pages(parity_slices, slots_per_page, slice_size, parity, lock_cells=False, stats=None):
     """Arrange parity slices into page groups.
 
     When ``lock_cells`` is True, slices from all parities are interleaved by
@@ -310,6 +328,9 @@ def group_parity_slices_into_pages(parity_slices, slots_per_page, slice_size, pa
     slices_per_page = slots_per_page // slice_size
     if slices_per_page == 0:
         print(f"Template has too few groups for slice size {slice_size}!")
+        if stats is not None:
+            stats["status"] = "error"
+            stats["error"] = f"Template has too few groups for slice size {slice_size}."
         return None
 
     pages = []
@@ -338,11 +359,15 @@ def group_parity_slices_into_pages(parity_slices, slots_per_page, slice_size, pa
     total_images = sum(len(slice_["items"]) for group in parity_slices for slice_ in group)
     total_slices = sum(len(group) for group in parity_slices)
     print(f"- {total_images} images split into {total_slices} slices, {len(pages)} pages")
+    if stats is not None:
+        stats["slices"] = total_slices
+        stats["page_count"] = len(pages)
     return pages
 
-def create_svg_pages(page_slices, template_path, slots_per_page, onepixel, svg_dir):
+def create_svg_pages(page_slices, template_path, slots_per_page, onepixel, svg_dir, stats=None):
     svg_pdf_pairs = []
     page_counter = 1
+    pages_meta = [] if stats is not None else None
     for page_idx, slice_group in enumerate(page_slices):
         tokenizer = bird.SVGTokenizer(template_path)
         tokenizer.parse_and_tokenize()
@@ -360,7 +385,18 @@ def create_svg_pages(page_slices, template_path, slots_per_page, onepixel, svg_d
         tokenizer.save_svg(output_svg)
         print(f"Saved SVG as {os.path.basename(output_svg)}")
         svg_pdf_pairs.append((output_svg, output_pdf))
+        if pages_meta is not None:
+            pages_meta.append({
+                "index": page_counter,
+                "svg": os.path.abspath(output_svg),
+                "pdf": os.path.abspath(output_pdf),
+                "sets": set_names,
+                "items": len(page_items),
+            })
         page_counter += 1
+    if stats is not None:
+        stats["pages_detail"] = pages_meta
+        stats["page_count"] = len(svg_pdf_pairs)
     return svg_pdf_pairs
 
 def convert_svgs_to_pdfs(svg_pdf_pairs):
@@ -382,36 +418,58 @@ def merge_pdfs(svg_pdf_pairs, output_dir):
     with open(final_pdf_path, "wb") as out_f:
         writer.write(out_f)
     print(f"Merged {len(pdf_files)} PDFs into {final_pdf_path}")
+    return final_pdf_path
 
-def process_image_set(root_path, template_path, output_dir, parity=1, lock_cells=False):
+def process_image_set(root_path, template_path, output_dir, parity=1, lock_cells=False, stats=None):
+    stats = stats or {}
+    stats["version"] = VERSION
+    stats["parity"] = parity
+    stats["lock_cells"] = bool(lock_cells)
+    stats["output_dir"] = os.path.abspath(output_dir)
+    stats["album_root"] = os.path.abspath(root_path)
+    stats["template"] = os.path.abspath(template_path)
     svg_dir = os.path.join(output_dir, "svg")
     pdf_dir = os.path.join(output_dir, "pdf")
     os.makedirs(svg_dir, exist_ok=True)
     os.makedirs(pdf_dir, exist_ok=True)
+    stats["svg_dir"] = os.path.abspath(svg_dir)
+    stats["pdf_dir"] = os.path.abspath(pdf_dir)
     cache_path = os.path.join(output_dir, ".imgcache")
     # Step 1: Discover and process images
-    processed_sets = discover_and_process_images(root_path, cache_path, ONEPIXEL)
+    processed_sets = discover_and_process_images(root_path, cache_path, ONEPIXEL, stats=stats)
     if not processed_sets:
-        return
+        return stats
     # Step 2: Load template info
-    tokenizer, groups, slots_per_page, slice_size = load_template_info(template_path)
+    tokenizer, groups, slots_per_page, slice_size = load_template_info(template_path, stats=stats)
+    stats["status"] = "processing"
     # Step 3/4: Layout slices into pages
     if parity > 1:
         parity_slices = collect_parity_slices(processed_sets, slice_size, parity, ONEPIXEL)
         page_slices = group_parity_slices_into_pages(
-            parity_slices, slots_per_page, slice_size, parity, lock_cells
+            parity_slices, slots_per_page, slice_size, parity, lock_cells, stats=stats
         )
+        stats["layout"] = "parity"
     else:
         all_slices = collect_all_slices(processed_sets, slice_size)
-        page_slices, _ = group_slices_into_pages(all_slices, slots_per_page, slice_size)
+        page_slices, _ = group_slices_into_pages(all_slices, slots_per_page, slice_size, stats=stats)
+        stats["layout"] = "sequential"
+    if stats.get("status") == "error":
+        return stats
     if not page_slices:
-        return
+        stats["status"] = "error"
+        stats["error"] = "No pages produced."
+        return stats
     # Step 5: Create SVG pages
-    svg_pdf_pairs = create_svg_pages(page_slices, template_path, slots_per_page, ONEPIXEL, svg_dir)
+    svg_pdf_pairs = create_svg_pages(page_slices, template_path, slots_per_page, ONEPIXEL, svg_dir, stats=stats)
     # Step 6: Convert SVGs to PDFs
     convert_svgs_to_pdfs(svg_pdf_pairs)
     # Step 7: Merge PDFs
-    merge_pdfs(svg_pdf_pairs, output_dir)
+    final_pdf = merge_pdfs(svg_pdf_pairs, output_dir)
+    stats["final_pdf"] = final_pdf
+    stats["status"] = "ok"
+    return stats
+
+
 def main():
     parser = argparse.ArgumentParser(description="Create SVG card pages from image directories.")
     parser.add_argument("--version", action="version", version=f"cardmaker {VERSION}")
@@ -424,18 +482,42 @@ def main():
         action="store_true",
         help="Keep each set in a fixed cell position across parity pages",
     )
+    parser.add_argument(
+        "--metadata-json",
+        type=str,
+        default=None,
+        help="Write generation metadata to the given JSON file.",
+    )
+    parser.add_argument(
+        "--emit-metadata",
+        action="store_true",
+        help="Emit generation metadata as JSON to stdout.",
+    )
     args = parser.parse_args()
 
-    process_image_set(
+    stats = process_image_set(
         args.root,
         args.template,
         args.output_dir,
         parity=args.parity,
         lock_cells=args.lock_cells,
     )
+    if args.metadata_json:
+        metadata_dir = os.path.dirname(os.path.abspath(args.metadata_json))
+        if metadata_dir:
+            os.makedirs(metadata_dir, exist_ok=True)
+        with open(args.metadata_json, "w", encoding="utf-8") as fh:
+            json.dump(stats, fh, indent=2)
+    if args.emit_metadata:
+        print(json.dumps(stats, indent=2))
+
+    status = (stats or {}).get("status")
+    if status != "ok":
+        return 1
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
 
 # --- Font Embedding in SVG to PDF (CairoSVG) ---
 # To embed Inter or NotoSans, add to your SVG template:

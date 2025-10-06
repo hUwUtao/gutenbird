@@ -4,81 +4,91 @@
   <meta charset="UTF-8">
   <title>Gutenbird Studio</title>
   <style>
+    :root {
+      color-scheme: dark;
+      --bg: #14161c;
+      --panel: #1e2129;
+      --border: #2b2f3a;
+      --accent: #3d7bfd;
+      --accent-hover: #5a8cff;
+      --text: #f2f4f8;
+      --muted: #969cab;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
-      font-family: "Segoe UI", sans-serif;
       margin: 0;
-      padding: 20px;
-      background: #1e1e1e;
-      color: #e0e0e0;
+      padding: 24px;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: radial-gradient(circle at top, #1d2230, #10131b 55%);
+      color: var(--text);
+      min-height: 100vh;
     }
 
     h1 {
-      font-weight: 400;
-      margin-top: 0;
-      margin-bottom: 20px;
+      font-weight: 500;
+      margin: 0 0 24px;
+      letter-spacing: 0.04em;
     }
 
-    button {
-      background: #0e639c;
-      color: #fff;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 4px;
-      cursor: pointer;
+    .app {
+      display: grid;
+      grid-template-columns: minmax(360px, 1.1fr) minmax(340px, 1fr);
+      gap: 24px;
     }
 
-    button:hover {
-      background: #1177bb;
-    }
-
-    button:disabled {
-      background: #555;
-    }
-
-    .panel {
-      background: #252526;
-      padding: 15px;
-      border-radius: 8px;
-      margin-bottom: 20px;
-    }
-
-    #container {
-      display: flex;
-      gap: 20px;
-    }
-
-    #leftPanel {
-      flex: 1;
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
       display: flex;
       flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 16px 32px rgba(0, 0, 0, 0.25);
     }
 
-    #rightPanel {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
+    .card.filled {
+      height: 100%;
     }
 
     .tabs {
       display: flex;
-      margin-bottom: 10px;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.02);
+      padding: 6px;
+      border-radius: 12px;
     }
 
     .tab {
       flex: 1;
-      background: #333;
       border: none;
-      padding: 8px 0;
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 14px;
+      background: transparent;
+      color: var(--muted);
       cursor: pointer;
+      transition: background 0.2s ease, color 0.2s ease;
     }
 
     .tab.active {
-      background: #0e639c;
+      background: var(--accent);
+      color: #fff;
     }
 
     .pane {
       display: none;
       flex: 1;
+      min-height: 360px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: rgba(17, 19, 27, 0.75);
+      overflow: hidden;
+      position: relative;
     }
 
     .pane.active {
@@ -87,60 +97,229 @@
 
     #templatePreview,
     #outputPreview {
-      max-width: 100%;
-      border: 1px solid #333;
-      background: #1e1e1e;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: rgba(12, 14, 20, 0.72);
+    }
+
+    .page-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field-label {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    .field-line {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+    }
+
+    .field-line input[type="number"],
+    .field-line input[type="text"] {
+      flex: 0 0 90px;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 10px;
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .field-line .value {
+      flex: 1;
+      font-size: 13px;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .field-line .value.empty {
+      color: rgba(255, 255, 255, 0.28);
+    }
+
+    .field-line button,
+    .page-controls button,
+    .actions button,
+    .chip {
+      border: none;
+      border-radius: 10px;
+      padding: 9px 14px;
+      font-size: 13px;
+      letter-spacing: 0.02em;
+      font-weight: 500;
+      cursor: pointer;
+      color: #fff;
+      background: var(--accent);
+      transition: background 0.2s ease, transform 0.2s ease;
+    }
+
+    button.secondary {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text);
+    }
+
+    button.secondary:hover {
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    button:hover {
+      background: var(--accent-hover);
+    }
+
+    button:disabled {
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.45);
+      cursor: not-allowed;
+    }
+
+    .chip {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--muted);
+      cursor: default;
+      padding: 8px 12px;
+    }
+
+    .chip strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    .actions button {
+      flex: 1;
     }
 
     #progress {
-      height: 200px;
+      min-height: 220px;
+      max-height: 280px;
+      background: rgba(0, 0, 0, 0.32);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      padding: 16px;
       overflow: auto;
-      background: #1e1e1e;
-      border: 1px solid #333;
-      padding: 10px;
+      font-family: "JetBrains Mono", "Fira Code", monospace;
+      font-size: 13px;
       white-space: pre-wrap;
+      line-height: 1.4;
     }
 
-    #pageControls {
-      margin-bottom: 10px;
+    .options-inline {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .options-inline label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--accent);
+    }
+
+    @media (max-width: 980px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .pane {
+        min-height: 260px;
+      }
     }
   </style>
 </head>
 <body>
   <h1>Gutenbird Studio</h1>
-  <div id="container">
-    <div id="leftPanel" class="panel">
+  <div class="app">
+    <section class="card filled">
       <div class="tabs">
-        <button class="tab active" data-target="templatePane">Template</button>
-        <button class="tab" data-target="outputPane">Output</button>
+        <button class="tab active" data-target="templatePane">Template Preview</button>
+        <button class="tab" data-target="outputPane">Output Preview</button>
       </div>
       <div id="templatePane" class="pane active">
-        <img id="templatePreview" />
+        <img id="templatePreview" alt="Template preview" />
       </div>
       <div id="outputPane" class="pane">
-        <div id="pageControls">
-          <label for="pageNumber">Page:</label>
+        <div class="page-controls">
+          <div class="chip">Page <strong><span id="pageNumberDisplay">1</span></strong></div>
           <input type="number" id="pageNumber" min="1" value="1" />
           <button id="loadPage">Load</button>
         </div>
-        <img id="outputPreview" />
+        <img id="outputPreview" alt="Output preview" />
       </div>
-    </div>
-    <div id="rightPanel">
-      <div class="panel">
-        <button id="chooseTemplate">Select Template</button>
-        <span id="templatePath"></span>
+    </section>
+    <section class="card filled">
+      <div class="field-group">
+        <span class="field-label">Template</span>
+        <div class="field-line">
+          <button id="chooseTemplate">Browse</button>
+          <span id="templatePath" class="value empty">No template selected</span>
+        </div>
       </div>
-      <div class="panel">
-        <button id="chooseAlbum">Select Albums Folder</button>
-        <span id="albumPath"></span>
+      <div class="field-group">
+        <span class="field-label">Albums Root</span>
+        <div class="field-line">
+          <button id="chooseAlbum">Browse</button>
+          <span id="albumPath" class="value empty">No folder selected</span>
+        </div>
       </div>
-      <div class="panel buttons">
+      <div class="field-group">
+        <span class="field-label">Output Folder</span>
+        <div class="field-line">
+          <button id="chooseOutput">Browse</button>
+          <span id="outputPath" class="value empty">Using app data folder</span>
+          <button id="clearOutput" class="secondary">Reset</button>
+        </div>
+      </div>
+      <div class="field-group">
+        <span class="field-label">Generation Options</span>
+        <div class="field-line options-inline">
+          <label>
+            Parity
+            <input type="number" id="parityInput" min="1" value="1" />
+          </label>
+          <label>
+            <input type="checkbox" id="lockCellsToggle" />
+            Lock cells across parity pages
+          </label>
+        </div>
+      </div>
+      <div class="actions">
         <button id="generate">Generate</button>
         <button id="saveFinal" disabled>Save final.pdf</button>
       </div>
-      <pre id="progress" class="panel"></pre>
-    </div>
+      <pre id="progress"></pre>
+    </section>
   </div>
   <script src="renderer.js"></script>
 </body>
