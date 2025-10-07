@@ -168,6 +168,8 @@ ipcMain.on('run-generation', (event, args) => {
     album,
     template,
     parity = 1,
+    cellStackMode = false,
+    copies = 1,
     outputDir: requestedOutput,
   } = args;
 
@@ -215,9 +217,15 @@ ipcMain.on('run-generation', (event, args) => {
     targetOutputDir,
     '--parity',
     String(parity),
+    '--copies',
+    String(copies),
     '--metadata-json',
     metadataPath,
   ];
+
+  if (cellStackMode) {
+    cliArgs.push('--cell-stack');
+  }
 
   const resolved = resolveCardmakerExecutable();
   let proc;

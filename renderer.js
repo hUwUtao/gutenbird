@@ -18,7 +18,9 @@ const nextPageBtn = document.getElementById('nextPage');
 const pageIndicators = document.getElementById('pageIndicators');
 const pageStatus = document.getElementById('pageStatus');
 const outputLoading = document.getElementById('outputLoading');
+const cellStackToggle = document.getElementById('cellStackToggle');
 const parityInput = document.getElementById('parityInput');
+const copiesInput = document.getElementById('copiesInput');
 const templatePathLabel = document.getElementById('templatePath');
 const albumPathLabel = document.getElementById('albumPath');
 const outputPathLabel = document.getElementById('outputPath');
@@ -58,9 +60,32 @@ if (customOutputDir) {
   updatePathLabel(outputPathLabel, customOutputDir, 'Using app data folder');
 }
 
-let parity = parseInt(localStorage.getItem('parity') || '1', 10);
+const storedLegacyCellStack = localStorage.getItem('cellStack');
+const storedParity = localStorage.getItem('parity') ?? storedLegacyCellStack;
+let parity = parseInt(storedParity || '1', 10);
 if (!Number.isInteger(parity) || parity < 1) parity = 1;
 parityInput.value = parity;
+if (storedLegacyCellStack !== null) {
+  localStorage.setItem('parity', String(parity));
+  localStorage.removeItem('cellStack');
+}
+
+const storedCellStackMode = localStorage.getItem('cellStackMode');
+let cellStackMode = storedCellStackMode === 'true';
+if (storedCellStackMode === null && parity > 1 && storedLegacyCellStack !== null) {
+  cellStackMode = true;
+}
+if (cellStackToggle) {
+  cellStackToggle.checked = cellStackMode;
+}
+if (storedCellStackMode === null) {
+  localStorage.setItem('cellStackMode', cellStackMode ? 'true' : 'false');
+}
+
+const storedCopies = localStorage.getItem('copies');
+let initialCopies = parseInt(storedCopies || '1', 10);
+if (!Number.isInteger(initialCopies) || initialCopies < 1) initialCopies = 1;
+copiesInput.value = initialCopies;
 
 
 function setLoadingOverlay(active, total = null) {
@@ -302,12 +327,25 @@ parityInput.addEventListener('change', () => {
   localStorage.setItem('parity', String(value));
 });
 
+if (cellStackToggle) {
+  cellStackToggle.addEventListener('change', () => {
+    localStorage.setItem('cellStackMode', cellStackToggle.checked ? 'true' : 'false');
+  });
+}
+
+copiesInput.addEventListener('change', () => {
+  const value = Math.max(1, parseInt(copiesInput.value, 10) || 1);
+  copiesInput.value = value;
+  localStorage.setItem('copies', String(value));
+});
+
 generateBtn.addEventListener('click', () => {
   if (!templatePath || !albumPath) {
     alert('Please choose a template and an albums folder.');
     return;
   }
   const parityValue = Math.max(1, parseInt(parityInput.value, 10) || 1);
+  const copiesValue = Math.max(1, parseInt(copiesInput.value, 10) || 1);
   clearProgress();
   saveBtn.disabled = true;
   generateBtn.disabled = true;
@@ -319,6 +357,8 @@ generateBtn.addEventListener('click', () => {
     album: albumPath,
     template: templatePath,
     parity: parityValue,
+    cellStackMode: Boolean(cellStackToggle?.checked),
+    copies: copiesValue,
     outputDir: customOutputDir || null,
   });
 });

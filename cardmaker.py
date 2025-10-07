@@ -5,7 +5,7 @@ import base64
 import json
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from PIL import Image
 import io
 import bird
@@ -226,6 +226,7 @@ class PagePlan:
 
     items: list  # length equals slots_per_page
     sets: list   # metadata for logging/debugging
+    space: list = field(default_factory=list)  # parity space metadata per slot
 
 
 def chunked(seq, size):
@@ -264,13 +265,16 @@ def generate_test_sets(set_count, min_cards, max_cards, placeholder, rng=None):
         processed_sets[f"set{idx + 1}"] = items
     return processed_sets
 
-def make_slices(images, slice_size, set_name):
+def make_slices(images, slice_size, set_name, placeholder, set_lookup):
     slices = []
     for i in range(0, len(images), slice_size):
-        chunk = images[i:i+slice_size]
-        # Pad if not enough
+        chunk = list(images[i:i + slice_size])
         if len(chunk) < slice_size:
-            chunk = chunk + [{"label": "", "image": ONEPIXEL}] * (slice_size - len(chunk))
+            padding = [
+                build_placeholder_card(placeholder, set_name=set_name, set_lookup=set_lookup)
+                for _ in range(slice_size - len(chunk))
+            ]
+            chunk.extend(padding)
         slices.append({"set": set_name, "items": chunk})
     return slices
 
@@ -314,29 +318,249 @@ def load_template_info(template_path, stats=None):
         stats["slice_size"] = slice_size
     return tokenizer, groups, slots_per_page, slice_size
 
-def collect_all_slices(processed_sets, slice_size):
+def collect_all_slices(processed_sets, slice_size, placeholder, set_lookup):
     all_slices = []
     for set_name, images in processed_sets.items():
-        slices = make_slices(images, slice_size, set_name)
+        slices = make_slices(images, slice_size, set_name, placeholder, set_lookup)
         all_slices.extend(slices)
     return all_slices
 
-def group_slices_into_pages(all_slices, slots_per_page, slice_size, placeholder, stats=None):
+
+def apply_copies(processed_sets, copies):
+    if copies <= 1:
+        return processed_sets
+
+    expanded_sets = {}
+    for set_name, images in processed_sets.items():
+        expanded_items = []
+        for image in images:
+            for _ in range(copies):
+                expanded_items.append(dict(image))
+        expanded_sets[set_name] = expanded_items
+    return expanded_sets
+
+
+def annotate_sets_with_meta(processed_sets, copies):
+    annotated_sets = {}
+    set_lookup = {}
+    for set_index, (set_name, images) in enumerate(processed_sets.items()):
+        annotated_items = []
+        for item_idx, image in enumerate(images):
+            new_item = dict(image)
+            meta = dict(new_item.get("_meta") or {})
+            meta.update({
+                "set": set_name,
+                "set_index": set_index,
+                "card_index": item_idx // copies if copies else item_idx,
+                "copy_index": item_idx % copies if copies else 0,
+                "global_index": item_idx,
+                "copies": copies,
+                "placeholder": False,
+            })
+            new_item["_meta"] = meta
+            annotated_items.append(new_item)
+        annotated_sets[set_name] = annotated_items
+        set_lookup[set_name] = {
+            "set_index": set_index,
+            "items": len(images),
+        }
+    return annotated_sets, set_lookup
+
+
+def build_placeholder_card(placeholder, set_name=None, set_lookup=None):
+    set_index = None
+    if set_lookup and set_name in set_lookup:
+        set_index = set_lookup[set_name]["set_index"]
+    return {
+        "label": "",
+        "image": placeholder,
+        "_meta": {
+            "set": set_name,
+            "set_index": set_index,
+            "card_index": None,
+            "copy_index": None,
+            "global_index": None,
+            "copies": None,
+            "placeholder": True,
+        },
+    }
+
+
+def build_space_entry(item, slot_index, stack_index, cell_index, extra=None):
+    meta = dict(item.get("_meta") or {})
+    entry = {
+        "slot": slot_index,
+        "stack": stack_index,
+        "cell": cell_index,
+        "set": meta.get("set"),
+        "set_index": meta.get("set_index"),
+        "card_index": meta.get("card_index"),
+        "copy_index": meta.get("copy_index"),
+        "global_index": meta.get("global_index"),
+        "copies": meta.get("copies"),
+        "placeholder": meta.get("placeholder", False),
+        "label": item.get("label"),
+    }
+    if extra:
+        entry.update(extra)
+    return entry
+
+
+def build_parity_space_summary(
+    page_plans,
+    layout_mode,
+    parity,
+    slots_per_page,
+    copies,
+    set_lookup,
+    cells_per_page=None,
+    cell_stack_mode=False,
+):
+    ordered_sets = sorted(
+        (
+            {"name": name, **meta}
+            for name, meta in set_lookup.items()
+        ),
+        key=lambda entry: entry.get("set_index", 0),
+    )
+    pages = []
+    for page_index, plan in enumerate(page_plans, start=1):
+        placements = []
+        for entry in getattr(plan, "space", []):
+            enriched = dict(entry)
+            enriched.setdefault("stack", 0 if parity <= 1 else enriched.get("stack"))
+            enriched["page"] = page_index
+            placements.append(enriched)
+        pages.append({
+            "page": page_index,
+            "placements": placements,
+        })
+    summary = {
+        "mode": layout_mode,
+        "stacks": parity if parity > 1 else 1,
+        "copies": copies,
+        "slots_per_page": slots_per_page,
+        "cells_per_page": cells_per_page if cells_per_page is not None else slots_per_page,
+        "page_count": len(page_plans),
+        "sets": ordered_sets,
+        "set_sequence": [entry["name"] for entry in ordered_sets],
+        "pages": pages,
+        "cell_stack_mode": bool(cell_stack_mode),
+    }
+    return summary
+
+def group_slices_into_pages(
+    all_slices,
+    slots_per_page,
+    slice_size,
+    placeholder,
+    parity,
+    set_lookup,
+    stats=None,
+):
     slices_per_page = slots_per_page // slice_size
     if slices_per_page == 0:
         print(f"Template has too few groups for slice size {slice_size}!")
         if stats is not None:
             stats["status"] = "error"
             stats["error"] = f"Template has too few groups for slice size {slice_size}."
-        return None
+        return None, None
+
+    stack_count = max(1, parity)
+    rows_per_page = slices_per_page
+    if stack_count > 1:
+        if rows_per_page % stack_count != 0:
+            print(
+                f"Template rows ({rows_per_page}) cannot be split into {stack_count} parity stacks."
+            )
+            if stats is not None:
+                stats["status"] = "error"
+                stats["error"] = (
+                    f"Rows per page ({rows_per_page}) must be divisible by parity ({stack_count})."
+                )
+            return None, None
+        rows_per_stack = rows_per_page // stack_count
+        cells_per_page = rows_per_stack * slice_size
+    else:
+        rows_per_stack = rows_per_page
+        cells_per_page = slots_per_page
+
+    total_slices = len(all_slices)
+    if total_slices == 0:
+        print("No slices available for naive layout.")
+        if stats is not None and stack_count > 1:
+            stats["rows_per_stack"] = rows_per_stack
+        return [], cells_per_page
+
+    page_count = math.ceil(total_slices / slices_per_page)
+
+    def make_placeholder_slice():
+        return {
+            "set": None,
+            "items": [
+                build_placeholder_card(placeholder, set_lookup=set_lookup)
+                for _ in range(slice_size)
+            ],
+        }
+
+    slice_index = 0
+
+    def take_slice():
+        nonlocal slice_index
+        if slice_index < total_slices:
+            slice_ = all_slices[slice_index]
+            slice_index += 1
+            return slice_
+        return make_placeholder_slice()
+
+    page_rows = [
+        [make_placeholder_slice() for _ in range(slices_per_page)]
+        for _ in range(page_count)
+    ]
+
+    for stack_idx in range(stack_count):
+        for page_idx in range(page_count):
+            for row_pos in range(rows_per_stack):
+                row_index = stack_idx * rows_per_stack + row_pos
+                if row_index >= slices_per_page:
+                    continue
+                page_rows[page_idx][row_index] = take_slice()
+
+    if slice_index < total_slices:
+        raise RuntimeError("Failed to allocate all slices into naive parity layout")
 
     page_plans = []
-    for slice_group in chunked(all_slices, slices_per_page):
-        items = [item for slice_ in slice_group for item in slice_["items"]]
-        if len(items) < slots_per_page:
-            items = items + ([{"label": "", "image": placeholder}] * (slots_per_page - len(items)))
-        sets = [slice_["set"] for slice_ in slice_group]
-        page_plans.append(PagePlan(items=items, sets=sets))
+    for page_idx, rows in enumerate(page_rows):
+        items = []
+        space = []
+        sets = [row.get("set") for row in rows]
+        for row_idx, slice_ in enumerate(rows):
+            slice_items = slice_["items"]
+            row_set_name = slice_.get("set")
+            for column_idx, item in enumerate(slice_items):
+                slot_index = len(items)
+                if stack_count > 1:
+                    stack_index = row_idx // rows_per_stack
+                    row_position = row_idx % rows_per_stack
+                else:
+                    stack_index = 0
+                    row_position = row_idx
+                cell_index = row_position * slice_size + column_idx
+                items.append(item)
+                space.append(
+                    build_space_entry(
+                        item,
+                        slot_index,
+                        stack_index=stack_index,
+                        cell_index=cell_index,
+                        extra={
+                            "slice": row_idx,
+                            "position_in_slice": column_idx,
+                            "row_set": row_set_name,
+                        },
+                    )
+                )
+        page_plans.append(PagePlan(items=items, sets=sets, space=space))
 
     print(
         f"- {sum(len(slice_['items']) for slice_ in all_slices)} items arranged into "
@@ -345,60 +569,85 @@ def group_slices_into_pages(all_slices, slots_per_page, slice_size, placeholder,
     if stats is not None:
         stats["slices"] = len(all_slices)
         stats["page_count"] = len(page_plans)
-    return page_plans
+        if stack_count > 1:
+            stats["rows_per_stack"] = rows_per_stack
+    return page_plans, cells_per_page
 
 
-def build_parity_page_plans(processed_sets, slots_per_page, parity, placeholder, stats=None):
-    if parity <= 1:
-        raise ValueError("Parity layout requires parity > 1")
+def build_cell_stack_page_plans(
+    processed_sets,
+    slots_per_page,
+    cell_stack,
+    placeholder,
+    set_lookup,
+    stats=None,
+):
+    if cell_stack <= 1:
+        raise ValueError("Cell stack layout requires cell_stack > 1")
 
-    if slots_per_page % parity != 0:
+    if slots_per_page % cell_stack != 0:
         print(
-            f"Template with {slots_per_page} slots cannot be split into {parity} parity "
+            f"Template with {slots_per_page} slots cannot be split into {cell_stack} cell stack "
             "segments."
         )
         if stats is not None:
             stats["status"] = "error"
             stats["error"] = (
-                f"Slots per page ({slots_per_page}) must be divisible by parity ({parity})."
+                f"Slots per page ({slots_per_page}) must be divisible by cell stack ({cell_stack})."
             )
         return None
 
-    cells_per_page = slots_per_page // parity
+    cells_per_page = slots_per_page // cell_stack
     ordered_sets = list(processed_sets.items())
     total_cards = sum(len(images) for _, images in ordered_sets)
     page_plans = []
-    parity_groups = 0
+    cell_stack_groups = 0
 
-    for group in chunked(ordered_sets, cells_per_page):
-        parity_groups += 1
+    for group_index, group in enumerate(chunked(ordered_sets, cells_per_page)):
+        cell_stack_groups += 1
         padded_group = list(group) + [(None, [])] * (cells_per_page - len(group))
         group_sets = [name for name, _ in group]
         max_len = max((len(images) for _, images in group), default=0)
         if max_len == 0:
             continue
-        limit = math.ceil(max_len / parity)
+        limit = math.ceil(max_len / cell_stack)
         if limit <= 0:
             continue
         for page_idx in range(limit):
             page_items = []
-            for parity_idx in range(parity):
-                card_offset = parity_idx * limit
-                for set_name, images in padded_group:
+            page_space = []
+            for stack_idx in range(cell_stack):
+                card_offset = stack_idx * limit
+                for cell_index, (set_name, images) in enumerate(padded_group):
                     card_index = page_idx + card_offset
                     if set_name is not None and card_index < len(images):
-                        page_items.append(images[card_index])
+                        item = images[card_index]
                     else:
-                        page_items.append({"label": "", "image": placeholder})
-            page_plans.append(PagePlan(items=page_items, sets=group_sets))
+                        item = build_placeholder_card(placeholder, set_name=set_name, set_lookup=set_lookup)
+                    slot_index = len(page_items)
+                    page_items.append(item)
+                    page_space.append(
+                        build_space_entry(
+                            item,
+                            slot_index,
+                            stack_index=stack_idx,
+                            cell_index=cell_index,
+                            extra={
+                                "group_index": group_index,
+                                "group_set": set_name,
+                                "page_cycle": page_idx,
+                            },
+                        )
+                    )
+            page_plans.append(PagePlan(items=page_items, sets=group_sets, space=page_space))
 
     print(
         f"- {total_cards} items across {len(ordered_sets)} sets, producing "
-        f"{len(page_plans)} parity pages"
+        f"{len(page_plans)} cell stack pages"
     )
     if stats is not None:
         stats["cells_per_page"] = cells_per_page
-        stats["parity_groups"] = parity_groups
+        stats["cell_stack_groups"] = cell_stack_groups
         stats["page_count"] = len(page_plans)
     return page_plans
 
@@ -433,6 +682,7 @@ def create_svg_pages(page_plans, template_path, slots_per_page, onepixel, svg_di
                 "pdf": os.path.abspath(output_pdf),
                 "sets": set_names,
                 "items": len(page_items),
+                "space": [dict(entry) for entry in getattr(plan, "space", [])],
             })
         page_counter += 1
     if stats is not None:
@@ -461,10 +711,21 @@ def merge_pdfs(svg_pdf_pairs, output_dir):
     print(f"Merged {len(pdf_files)} PDFs into {final_pdf_path}")
     return final_pdf_path
 
-def process_image_set(root_path, template_path, output_dir, parity=1, stats=None, testmode=None):
+def process_image_set(
+    root_path,
+    template_path,
+    output_dir,
+    parity=1,
+    cell_stack_mode=False,
+    copies=1,
+    stats=None,
+    testmode=None,
+):
     stats = stats or {}
     stats["version"] = VERSION
     stats["parity"] = parity
+    stats["cell_stack_mode"] = bool(cell_stack_mode)
+    stats["copies"] = copies
     stats["output_dir"] = os.path.abspath(output_dir)
     stats["album_root"] = os.path.abspath(root_path)
     stats["template"] = os.path.abspath(template_path)
@@ -476,6 +737,11 @@ def process_image_set(root_path, template_path, output_dir, parity=1, stats=None
     stats["pdf_dir"] = os.path.abspath(pdf_dir)
     cache_path = os.path.join(output_dir, ".imgcache")
     # Step 1: Discover and process images or synthesize test sets
+    if copies < 1:
+        stats["status"] = "error"
+        stats["error"] = "Copies must be at least 1."
+        return stats
+
     if testmode is not None:
         set_count, min_cards, max_cards = testmode
         stats["testmode"] = {
@@ -495,6 +761,15 @@ def process_image_set(root_path, template_path, output_dir, parity=1, stats=None
         processed_sets = discover_and_process_images(root_path, cache_path, ONEPIXEL, stats=stats)
     if not processed_sets:
         return stats
+
+    if copies > 1:
+        processed_sets = apply_copies(processed_sets, copies)
+        stats["images"] = sum(len(images) for images in processed_sets.values())
+
+    processed_sets, set_lookup = annotate_sets_with_meta(processed_sets, copies)
+    stats["set_sequence"] = [
+        name for name, _ in sorted(set_lookup.items(), key=lambda entry: entry[1]["set_index"])
+    ]
     # Step 2: Load template info
     _, _, slots_per_page, slice_size = load_template_info(template_path, stats=stats)
     stats["status"] = "processing"
@@ -502,31 +777,59 @@ def process_image_set(root_path, template_path, output_dir, parity=1, stats=None
     rows_per_page = slots_per_page // slice_size if slice_size else 0
     stats["rows_per_page"] = rows_per_page
 
-    if parity > 1:
-        page_plans = build_parity_page_plans(
+    summary_cells = None
+    if cell_stack_mode:
+        if parity <= 1:
+            stats["status"] = "error"
+            stats["error"] = "Cell stack mode requires --parity greater than 1."
+            return stats
+        page_plans = build_cell_stack_page_plans(
             processed_sets,
             slots_per_page,
             parity,
             ONEPIXEL,
+            set_lookup,
             stats=stats,
         )
-        stats["layout"] = "parity"
+        summary_cells = stats.get("cells_per_page")
+        if summary_cells is None and parity > 0:
+            summary_cells = slots_per_page // parity
+        layout_mode = "cell_stack"
     else:
-        all_slices = collect_all_slices(processed_sets, slice_size)
-        page_plans = group_slices_into_pages(
+        all_slices = collect_all_slices(processed_sets, slice_size, ONEPIXEL, set_lookup)
+        page_plans, summary_cells = group_slices_into_pages(
             all_slices,
             slots_per_page,
             slice_size,
             ONEPIXEL,
+            parity,
+            set_lookup,
             stats=stats,
         )
-        stats["layout"] = "sequential"
+        if page_plans is None:
+            return stats
+        if summary_cells is None:
+            summary_cells = slots_per_page if parity <= 1 else math.ceil(slots_per_page / max(1, parity))
+        stats["cells_per_page"] = summary_cells
+        layout_mode = "naive_strip"
+    stats["layout"] = layout_mode
     if stats.get("status") == "error":
         return stats
     if not page_plans:
         stats["status"] = "error"
         stats["error"] = "No pages produced."
         return stats
+    stats["parity_space"] = build_parity_space_summary(
+        page_plans,
+        layout_mode,
+        parity,
+        slots_per_page,
+        copies,
+        set_lookup,
+        cells_per_page=summary_cells,
+        cell_stack_mode=cell_stack_mode,
+    )
+
     # Step 5: Create SVG pages
     svg_pdf_pairs = create_svg_pages(page_plans, template_path, slots_per_page, ONEPIXEL, svg_dir, stats=stats)
     # Step 6: Convert SVGs to PDFs
@@ -544,7 +847,23 @@ def main():
     parser.add_argument("root", type=str, help="Root directory to search for images")
     parser.add_argument("template", type=str, help="SVG template file to use")
     parser.add_argument("--output-dir", type=str, default="dist", help="Output directory for SVG files (default: dist)")
-    parser.add_argument("--parity", type=int, default=1, help="Parity grouping value")
+    parser.add_argument(
+        "--parity",
+        type=int,
+        default=1,
+        help="Parity split value (applies to metadata and cell stack layout)",
+    )
+    parser.add_argument(
+        "--cell-stack",
+        action="store_true",
+        help="Enable cell stack layout (requires parity > 1)",
+    )
+    parser.add_argument(
+        "--copies",
+        type=int,
+        default=1,
+        help="Number of copies to emit for each card",
+    )
     parser.add_argument(
         "--metadata-json",
         type=str,
@@ -577,6 +896,8 @@ def main():
         args.template,
         args.output_dir,
         parity=args.parity,
+        cell_stack_mode=args.cell_stack,
+        copies=args.copies,
         testmode=testmode_spec,
     )
     if args.metadata_json:
