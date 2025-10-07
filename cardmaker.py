@@ -25,13 +25,14 @@ DEFAULT_SLICE_SIZE = None
 csv.field_size_limit(1024 * 1024 * 1024)
 
 # cairo prec
-if os.name == 'nt':
-    os.environ['PATH'] += ';C:\\Program Files\\GTK3-Runtime Win64\\bin'
+if os.name == "nt":
+    os.environ["PATH"] += ";C:\\Program Files\\GTK3-Runtime Win64\\bin"
 import cairosvg
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
+
 
 def process_image(image_path):
     """Convert an image to a square ratio with a white background and return its data URL, scaling to fit the largest dimension."""
@@ -53,49 +54,56 @@ def process_image(image_path):
         img_bytes = io.BytesIO()
         final_img.save(img_bytes, format="JPEG", quality=90, optimize=True)
         img_bytes = img_bytes.getvalue()
-        b64_img = base64.b64encode(img_bytes).decode('utf-8')
+        b64_img = base64.b64encode(img_bytes).decode("utf-8")
         return f"data:image/jpg;base64,{b64_img}"
+
 
 def discover_image_sets(root_path):
     """Discover all image sets and their files in the directory structure."""
     print("\n=== Discovering Image Sets ===")
     image_sets = {}
     total_files = 0
-    
+
     for dirpath, dirnames, filenames in os.walk(root_path):
         set_name = os.path.basename(dirpath)
         if set_name == os.path.basename(root_path):
             continue  # Skip the root directory itself
-        
+
         # Filter image files
-        image_files = [f for f in filenames if os.path.splitext(f)[1].lstrip(".").lower() in ["jpg", "jpeg", "png", "bmp", "gif"]]
+        image_files = [
+            f
+            for f in filenames
+            if os.path.splitext(f)[1].lstrip(".").lower()
+            in ["jpg", "jpeg", "png", "bmp", "gif"]
+        ]
         if not image_files:
             continue
-            
+
         # print(f"\nDiscovered set '{set_name}':")
         # print(f"- Contains {len(image_files)} image files")
         # for f in image_files:
         #     print(f"  └─ {f}")
-            
+
         image_sets[set_name] = [
             {
                 "file_path": os.path.join(dirpath, f),
                 "label": os.path.splitext(f)[0],
-                "original_name": f
+                "original_name": f,
             }
             for f in image_files
         ]
         total_files += len(image_files)
-    
+
     print(f"\nTotal sets discovered: {len(image_sets)}")
     print(f"Total images found: {total_files}")
     return image_sets
+
 
 def get_image_cache_csv(cache_path):
     cache = {}
     if os.path.exists(cache_path):
         try:
-            with gzip.open(cache_path, 'rt', encoding='utf-8', newline='') as f:
+            with gzip.open(cache_path, "rt", encoding="utf-8", newline="") as f:
                 reader = csv.reader(f)
                 for row in reader:
                     if len(row) != 3:
@@ -116,6 +124,7 @@ def get_image_cache_csv(cache_path):
             exit(1)
     return cache
 
+
 # def append_image_cache_csv(cache_path, file_path, mtime, data_url):
 #     try:
 #         with gzip.open(cache_path, 'at', encoding='utf-8', newline='') as f:
@@ -124,8 +133,9 @@ def get_image_cache_csv(cache_path):
 #     except Exception as e:
 #         print(f"Failed to append to image cache: {e}")
 
+
 def wal_writer_thread(cache_path, wal_queue, stop_event):
-    with gzip.open(cache_path, 'at', encoding='utf-8', newline='') as f:
+    with gzip.open(cache_path, "at", encoding="utf-8", newline="") as f:
         csv_writer = csv.writer(f)
         while not stop_event.is_set() or not wal_queue.empty():
             try:
@@ -133,18 +143,20 @@ def wal_writer_thread(cache_path, wal_queue, stop_event):
                 if entry is None:
                     break
                 file_path, mtime, data_url = entry
-                mtime_value = '' if mtime is None else str(mtime)
+                mtime_value = "" if mtime is None else str(mtime)
                 csv_writer.writerow([file_path, mtime_value, data_url])
                 f.flush()
                 wal_queue.task_done()
             except queue.Empty:
                 continue
 
+
 def get_normalized_mtime(image_path):
     try:
         return int(round(os.path.getmtime(image_path) * 1000))
     except Exception:
         return None
+
 
 def process_image_with_cache(image_path, cache, cache_path, wal_queue=None):
     mtime = get_normalized_mtime(image_path)
@@ -161,20 +173,27 @@ def process_image_with_cache(image_path, cache, cache_path, wal_queue=None):
     #     append_image_cache_csv(cache_path, image_path, mtime, data_url)
     return data_url
 
+
 def process_image_with_index(args):
     img_info, idx, total, set_name, cache, cache_path, wal_queue = args
-    data_url = process_image_with_cache(img_info['file_path'], cache, cache_path, wal_queue)
-    return ({
-        "label": img_info['label'],
-        "image": data_url,
-        "original_name": img_info['original_name']
-    }, idx - 1)  # -1 because idx starts from 1
+    data_url = process_image_with_cache(
+        img_info["file_path"], cache, cache_path, wal_queue
+    )
+    return (
+        {
+            "label": img_info["label"],
+            "image": data_url,
+            "original_name": img_info["original_name"],
+        },
+        idx - 1,
+    )  # -1 because idx starts from 1
+
 
 def filter_label(label: str) -> str:
     # Trim the label
     label = label.strip()
     # Split by ., ,, _, -
-    parts = re.split(r'[.,_\-]', label)
+    parts = re.split(r"[.,_\-]", label)
     # Trim each part
     parts = [p.strip() for p in parts]
     # Remove first part if it's empty, a single number, or a single character
@@ -186,13 +205,16 @@ def filter_label(label: str) -> str:
     # Join with space
     return " ".join(parts)
 
-def process_image_sets(image_sets, cache_path="./dist/.imgcache"):
+
+def process_image_sets(image_sets, cache_path="./tmp/.imgcache"):
     print("\n=== Processing Images (Parallel, with WAL CSV cache via queue) ===")
     processed_sets = {}
     cache = get_image_cache_csv(cache_path)
     wal_queue = queue.Queue()
     stop_event = threading.Event()
-    writer_thread = threading.Thread(target=wal_writer_thread, args=(cache_path, wal_queue, stop_event))
+    writer_thread = threading.Thread(
+        target=wal_writer_thread, args=(cache_path, wal_queue, stop_event)
+    )
     writer_thread.start()
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=24) as executor:
@@ -202,20 +224,23 @@ def process_image_sets(image_sets, cache_path="./dist/.imgcache"):
                 for idx, img_info in enumerate(images, 1):
                     future = executor.submit(
                         process_image_with_index,
-                        (img_info, idx, total, set_name, cache, cache_path, wal_queue)
+                        (img_info, idx, total, set_name, cache, cache_path, wal_queue),
                     )
                     futures.append(future)
                 results = []
                 for future in concurrent.futures.as_completed(futures):
                     result, original_idx = future.result()
                     results.append((original_idx, result))
-                processed_sets[set_name] = [r[1] for r in sorted(results, key=lambda x: x[0])]
+                processed_sets[set_name] = [
+                    r[1] for r in sorted(results, key=lambda x: x[0])
+                ]
         wal_queue.join()
     finally:
         stop_event.set()
         wal_queue.put(None)
         writer_thread.join()
     return processed_sets
+
 
 ONEPIXEL = "data:image/webp;base64,UklGRhYAAABXRUJQVlA4TAoAAAAvAAAAAEX/I/of"
 
@@ -225,13 +250,13 @@ class PagePlan:
     """Represents a fully expanded page ready to be rendered."""
 
     items: list  # length equals slots_per_page
-    sets: list   # metadata for logging/debugging
+    sets: list  # metadata for logging/debugging
     space: list = field(default_factory=list)  # parity space metadata per slot
 
 
 def chunked(seq, size):
     for i in range(0, len(seq), size):
-        yield seq[i:i + size]
+        yield seq[i : i + size]
 
 
 def parse_testmode_spec(spec):
@@ -265,18 +290,22 @@ def generate_test_sets(set_count, min_cards, max_cards, placeholder, rng=None):
         processed_sets[f"set{idx + 1}"] = items
     return processed_sets
 
+
 def make_slices(images, slice_size, set_name, placeholder, set_lookup):
     slices = []
     for i in range(0, len(images), slice_size):
-        chunk = list(images[i:i + slice_size])
+        chunk = list(images[i : i + slice_size])
         if len(chunk) < slice_size:
             padding = [
-                build_placeholder_card(placeholder, set_name=set_name, set_lookup=set_lookup)
+                build_placeholder_card(
+                    placeholder, set_name=set_name, set_lookup=set_lookup
+                )
                 for _ in range(slice_size - len(chunk))
             ]
             chunk.extend(padding)
         slices.append({"set": set_name, "items": chunk})
     return slices
+
 
 def discover_and_process_images(root_path, cache_path, onepixel, stats=None):
     image_sets = discover_image_sets(root_path)
@@ -294,6 +323,7 @@ def discover_and_process_images(root_path, cache_path, onepixel, stats=None):
         stats["images"] = sum(len(images) for images in processed_sets.values())
     return processed_sets
 
+
 def load_template_info(template_path, stats=None):
     tokenizer = bird.SVGTokenizer(template_path)
     tokenizer.parse_and_tokenize()
@@ -301,7 +331,7 @@ def load_template_info(template_path, stats=None):
     slots_per_page = len(groups)
     slice_size = DEFAULT_SLICE_SIZE
     try:
-        with open(template_path, 'r', encoding='utf-8') as f:
+        with open(template_path, "r", encoding="utf-8") as f:
             content = f.read()
         match = re.search(r"\(slice=(\d+)\)", content)
         if match:
@@ -317,6 +347,7 @@ def load_template_info(template_path, stats=None):
         stats["slots_per_page"] = slots_per_page
         stats["slice_size"] = slice_size
     return tokenizer, groups, slots_per_page, slice_size
+
 
 def collect_all_slices(processed_sets, slice_size, placeholder, set_lookup):
     all_slices = []
@@ -348,15 +379,17 @@ def annotate_sets_with_meta(processed_sets, copies):
         for item_idx, image in enumerate(images):
             new_item = dict(image)
             meta = dict(new_item.get("_meta") or {})
-            meta.update({
-                "set": set_name,
-                "set_index": set_index,
-                "card_index": item_idx // copies if copies else item_idx,
-                "copy_index": item_idx % copies if copies else 0,
-                "global_index": item_idx,
-                "copies": copies,
-                "placeholder": False,
-            })
+            meta.update(
+                {
+                    "set": set_name,
+                    "set_index": set_index,
+                    "card_index": item_idx // copies if copies else item_idx,
+                    "copy_index": item_idx % copies if copies else 0,
+                    "global_index": item_idx,
+                    "copies": copies,
+                    "placeholder": False,
+                }
+            )
             new_item["_meta"] = meta
             annotated_items.append(new_item)
         annotated_sets[set_name] = annotated_items
@@ -417,10 +450,7 @@ def build_parity_space_summary(
     cell_stack_mode=False,
 ):
     ordered_sets = sorted(
-        (
-            {"name": name, **meta}
-            for name, meta in set_lookup.items()
-        ),
+        ({"name": name, **meta} for name, meta in set_lookup.items()),
         key=lambda entry: entry.get("set_index", 0),
     )
     pages = []
@@ -431,16 +461,20 @@ def build_parity_space_summary(
             enriched.setdefault("stack", 0 if parity <= 1 else enriched.get("stack"))
             enriched["page"] = page_index
             placements.append(enriched)
-        pages.append({
-            "page": page_index,
-            "placements": placements,
-        })
+        pages.append(
+            {
+                "page": page_index,
+                "placements": placements,
+            }
+        )
     summary = {
         "mode": layout_mode,
         "stacks": parity if parity > 1 else 1,
         "copies": copies,
         "slots_per_page": slots_per_page,
-        "cells_per_page": cells_per_page if cells_per_page is not None else slots_per_page,
+        "cells_per_page": cells_per_page
+        if cells_per_page is not None
+        else slots_per_page,
         "page_count": len(page_plans),
         "sets": ordered_sets,
         "set_sequence": [entry["name"] for entry in ordered_sets],
@@ -448,6 +482,7 @@ def build_parity_space_summary(
         "cell_stack_mode": bool(cell_stack_mode),
     }
     return summary
+
 
 def group_slices_into_pages(
     all_slices,
@@ -582,8 +617,8 @@ def build_cell_stack_page_plans(
     set_lookup,
     stats=None,
 ):
-    if cell_stack <= 1:
-        raise ValueError("Cell stack layout requires cell_stack > 1")
+    # if cell_stack <= 1:
+    #     raise ValueError("Cell stack layout requires cell_stack > 1")
 
     if slots_per_page % cell_stack != 0:
         print(
@@ -623,7 +658,9 @@ def build_cell_stack_page_plans(
                     if set_name is not None and card_index < len(images):
                         item = images[card_index]
                     else:
-                        item = build_placeholder_card(placeholder, set_name=set_name, set_lookup=set_lookup)
+                        item = build_placeholder_card(
+                            placeholder, set_name=set_name, set_lookup=set_lookup
+                        )
                     slot_index = len(page_items)
                     page_items.append(item)
                     page_space.append(
@@ -639,7 +676,9 @@ def build_cell_stack_page_plans(
                             },
                         )
                     )
-            page_plans.append(PagePlan(items=page_items, sets=group_sets, space=page_space))
+            page_plans.append(
+                PagePlan(items=page_items, sets=group_sets, space=page_space)
+            )
 
     print(
         f"- {total_cards} items across {len(ordered_sets)} sets, producing "
@@ -651,7 +690,10 @@ def build_cell_stack_page_plans(
         stats["page_count"] = len(page_plans)
     return page_plans
 
-def create_svg_pages(page_plans, template_path, slots_per_page, onepixel, svg_dir, stats=None):
+
+def create_svg_pages(
+    page_plans, template_path, slots_per_page, onepixel, svg_dir, stats=None
+):
     svg_pdf_pairs = []
     page_counter = 1
     pages_meta = [] if stats is not None else None
@@ -661,7 +703,9 @@ def create_svg_pages(page_plans, template_path, slots_per_page, onepixel, svg_di
         groups = tokenizer.get_matched_groups()
         page_items = list(plan.items)
         if len(page_items) < slots_per_page:
-            page_items += [{"label": "", "image": onepixel}] * (slots_per_page - len(page_items))
+            page_items += [{"label": "", "image": onepixel}] * (
+                slots_per_page - len(page_items)
+            )
         set_names = plan.sets
         print(
             f"\nCreating page {page_idx + 1}/{len(page_plans)} with {len(page_items)} items "
@@ -671,34 +715,41 @@ def create_svg_pages(page_plans, template_path, slots_per_page, onepixel, svg_di
             tokenizer.modify_group_labels(idx, filter_label(item["label"]))
             tokenizer.modify_group_images(idx, item["image"])
         output_svg = os.path.join(svg_dir, f"page_{page_counter:03d}.svg")
-        output_pdf = os.path.join(os.path.dirname(svg_dir), "pdf", f"page_{page_counter:03d}.pdf")
+        output_pdf = os.path.join(
+            os.path.dirname(svg_dir), "pdf", f"page_{page_counter:03d}.pdf"
+        )
         tokenizer.save_svg(output_svg)
         print(f"Saved SVG as {os.path.basename(output_svg)}")
         svg_pdf_pairs.append((output_svg, output_pdf))
         if pages_meta is not None:
-            pages_meta.append({
-                "index": page_counter,
-                "svg": os.path.abspath(output_svg),
-                "pdf": os.path.abspath(output_pdf),
-                "sets": set_names,
-                "items": len(page_items),
-                "space": [dict(entry) for entry in getattr(plan, "space", [])],
-            })
+            pages_meta.append(
+                {
+                    "index": page_counter,
+                    "svg": os.path.abspath(output_svg),
+                    "pdf": os.path.abspath(output_pdf),
+                    "sets": set_names,
+                    "items": len(page_items),
+                    "space": [dict(entry) for entry in getattr(plan, "space", [])],
+                }
+            )
         page_counter += 1
     if stats is not None:
         stats["pages_detail"] = pages_meta
         stats["page_count"] = len(svg_pdf_pairs)
     return svg_pdf_pairs
 
+
 def convert_svgs_to_pdfs(svg_pdf_pairs):
     print("\n=== Converting SVGs to PDFs in parallel ===")
-    for (svg_path, pdf_path) in svg_pdf_pairs:
+    for svg_path, pdf_path in svg_pdf_pairs:
         print(f"Converting {os.path.basename(svg_path)} to PDF...")
         cairosvg.svg2pdf(url=svg_path, write_to=pdf_path)
 
+
 def merge_pdfs(svg_pdf_pairs, output_dir):
-    print("\n=== Merging all PDFs into dist/final.pdf ===")
+    print("\n=== Merging all PDFs into tmp/final.pdf ===")
     from pypdf import PdfWriter
+
     pdf_files = [pdf_path for (_, pdf_path) in svg_pdf_pairs]
     writer = PdfWriter()
     for pdf_file in pdf_files:
@@ -710,6 +761,7 @@ def merge_pdfs(svg_pdf_pairs, output_dir):
         writer.write(out_f)
     print(f"Merged {len(pdf_files)} PDFs into {final_pdf_path}")
     return final_pdf_path
+
 
 def process_image_set(
     root_path,
@@ -758,7 +810,9 @@ def process_image_set(
         stats["sets"] = len(processed_sets)
         stats["images"] = sum(len(images) for images in processed_sets.values())
     else:
-        processed_sets = discover_and_process_images(root_path, cache_path, ONEPIXEL, stats=stats)
+        processed_sets = discover_and_process_images(
+            root_path, cache_path, ONEPIXEL, stats=stats
+        )
     if not processed_sets:
         return stats
 
@@ -768,7 +822,10 @@ def process_image_set(
 
     processed_sets, set_lookup = annotate_sets_with_meta(processed_sets, copies)
     stats["set_sequence"] = [
-        name for name, _ in sorted(set_lookup.items(), key=lambda entry: entry[1]["set_index"])
+        name
+        for name, _ in sorted(
+            set_lookup.items(), key=lambda entry: entry[1]["set_index"]
+        )
     ]
     # Step 2: Load template info
     _, _, slots_per_page, slice_size = load_template_info(template_path, stats=stats)
@@ -779,9 +836,9 @@ def process_image_set(
 
     summary_cells = None
     if cell_stack_mode:
-        if parity <= 1:
+        if parity <= 0:
             stats["status"] = "error"
-            stats["error"] = "Cell stack mode requires --parity greater than 1."
+            stats["error"] = "Cell stack mode requires --parity greater than 0."
             return stats
         page_plans = build_cell_stack_page_plans(
             processed_sets,
@@ -796,7 +853,9 @@ def process_image_set(
             summary_cells = slots_per_page // parity
         layout_mode = "cell_stack"
     else:
-        all_slices = collect_all_slices(processed_sets, slice_size, ONEPIXEL, set_lookup)
+        all_slices = collect_all_slices(
+            processed_sets, slice_size, ONEPIXEL, set_lookup
+        )
         page_plans, summary_cells = group_slices_into_pages(
             all_slices,
             slots_per_page,
@@ -809,7 +868,11 @@ def process_image_set(
         if page_plans is None:
             return stats
         if summary_cells is None:
-            summary_cells = slots_per_page if parity <= 1 else math.ceil(slots_per_page / max(1, parity))
+            summary_cells = (
+                slots_per_page
+                if parity <= 1
+                else math.ceil(slots_per_page / max(1, parity))
+            )
         stats["cells_per_page"] = summary_cells
         layout_mode = "naive_strip"
     stats["layout"] = layout_mode
@@ -831,7 +894,9 @@ def process_image_set(
     )
 
     # Step 5: Create SVG pages
-    svg_pdf_pairs = create_svg_pages(page_plans, template_path, slots_per_page, ONEPIXEL, svg_dir, stats=stats)
+    svg_pdf_pairs = create_svg_pages(
+        page_plans, template_path, slots_per_page, ONEPIXEL, svg_dir, stats=stats
+    )
     # Step 6: Convert SVGs to PDFs
     convert_svgs_to_pdfs(svg_pdf_pairs)
     # Step 7: Merge PDFs
@@ -842,11 +907,18 @@ def process_image_set(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Create SVG card pages from image directories.")
+    parser = argparse.ArgumentParser(
+        description="Create SVG card pages from image directories."
+    )
     parser.add_argument("--version", action="version", version=f"cardmaker {VERSION}")
     parser.add_argument("root", type=str, help="Root directory to search for images")
     parser.add_argument("template", type=str, help="SVG template file to use")
-    parser.add_argument("--output-dir", type=str, default="dist", help="Output directory for SVG files (default: dist)")
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="tmp",
+        help="Output directory for SVG files (default: tmp)",
+    )
     parser.add_argument(
         "--parity",
         type=int,
@@ -913,6 +985,7 @@ def main():
     if status != "ok":
         return 1
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())
