@@ -78,6 +78,11 @@ uv run python cardmaker.py albums template.svg --parity 3 --cell-stack --output-
 # Emit two copies of every card while maintaining stack alignment
 uv run python cardmaker.py albums template.svg --parity 2 --cell-stack --copies 2
 
+When `--copies` is paired with `--cell-stack`, duplicates stay collated per set.
+Each stack cycles through the original set order (`1,2,3`) before moving on to
+the next copy, yielding output in the pattern `1,2,3,1,2,3,…` within each cell
+instead of grouping copies as `1,1,1,2,2,2,3,3,3`.
+
 # Record parity space metadata without enabling cell stack layout
 uv run python cardmaker.py albums template.svg --parity 4 --emit-metadata
 ```

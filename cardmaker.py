@@ -357,16 +357,31 @@ def collect_all_slices(processed_sets, slice_size, placeholder, set_lookup):
     return all_slices
 
 
-def apply_copies(processed_sets, copies):
+def apply_copies(processed_sets, copies, *, collate=False):
     if copies <= 1:
         return processed_sets
 
     expanded_sets = {}
     for set_name, images in processed_sets.items():
         expanded_items = []
-        for image in images:
-            for _ in range(copies):
-                expanded_items.append(dict(image))
+        if collate:
+            for copy_index in range(copies):
+                for card_index, image in enumerate(images):
+                    new_item = dict(image)
+                    meta = dict(new_item.get("_meta") or {})
+                    meta["_prefill_card_index"] = card_index
+                    meta["_prefill_copy_index"] = copy_index
+                    new_item["_meta"] = meta
+                    expanded_items.append(new_item)
+        else:
+            for card_index, image in enumerate(images):
+                for copy_index in range(copies):
+                    new_item = dict(image)
+                    meta = dict(new_item.get("_meta") or {})
+                    meta["_prefill_card_index"] = card_index
+                    meta["_prefill_copy_index"] = copy_index
+                    new_item["_meta"] = meta
+                    expanded_items.append(new_item)
         expanded_sets[set_name] = expanded_items
     return expanded_sets
 
@@ -379,12 +394,24 @@ def annotate_sets_with_meta(processed_sets, copies):
         for item_idx, image in enumerate(images):
             new_item = dict(image)
             meta = dict(new_item.get("_meta") or {})
+            prefill_card_index = meta.pop("_prefill_card_index", None)
+            prefill_copy_index = meta.pop("_prefill_copy_index", None)
+            card_index = (
+                prefill_card_index
+                if prefill_card_index is not None
+                else (item_idx // copies if copies else item_idx)
+            )
+            copy_index = (
+                prefill_copy_index
+                if prefill_copy_index is not None
+                else (item_idx % copies if copies else 0)
+            )
             meta.update(
                 {
                     "set": set_name,
                     "set_index": set_index,
-                    "card_index": item_idx // copies if copies else item_idx,
-                    "copy_index": item_idx % copies if copies else 0,
+                    "card_index": card_index,
+                    "copy_index": copy_index,
                     "global_index": item_idx,
                     "copies": copies,
                     "placeholder": False,
@@ -817,7 +844,9 @@ def process_image_set(
         return stats
 
     if copies > 1:
-        processed_sets = apply_copies(processed_sets, copies)
+        processed_sets = apply_copies(
+            processed_sets, copies, collate=cell_stack_mode
+        )
         stats["images"] = sum(len(images) for images in processed_sets.values())
 
     processed_sets, set_lookup = annotate_sets_with_meta(processed_sets, copies)
