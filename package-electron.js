@@ -1,17 +1,23 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
+/* eslint-disable no-console */
 
-import { $ } from "bun";
-import { join, dirname } from "path";
+import { promises as fs } from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import { spawn } from "child_process";
 
-const root = import.meta.dir;
-const stagingDir = join(root, "build", "electron-app");
-const distDir = join(root, "dist");
-const lockFile = join(root, "bun.lock");
-const pyBuildDir = join(root, "build", "py", "cardmaker");
-const assetsDir = join(root, "assets");
-const iconDir = join(assetsDir, "icon");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// Parse command line arguments
+const root = __dirname;
+const stagingDir = path.join(root, "build", "electron-app");
+const distDir = path.join(root, "dist");
+const lockFile = path.join(root, "bun.lock"); // kept as-is
+const pyBuildDir = path.join(root, "build", "py", "cardmaker");
+const assetsDir = path.join(root, "assets");
+const iconDir = path.join(assetsDir, "icon");
+
+// args
 const packageArgs = process.argv.slice(2);
 let platform = process.platform;
 let arch = process.arch === "arm64" ? "arm64" : "x64";
@@ -22,69 +28,63 @@ for (const arg of packageArgs) {
     platform = arg;
     continue;
   }
-  if (
-    !arg.startsWith("--") &&
-    arch === (process.arch === "arm64" ? "arm64" : "x64")
-  ) {
+  if (!arg.startsWith("--") && arch === (process.arch === "arm64" ? "arm64" : "x64")) {
     arch = arg;
     continue;
   }
   forwarded.push(arg);
 }
 
-// Validate prerequisites
-// Check if main entry point exists in dist
-const mainEntry = join(distDir, "main", "index.js");
-try {
-  await Bun.file(mainEntry).text();
-} catch {
+async function exists(p) {
+  try { await fs.access(p); return true; } catch { return false; }
+}
+
+async function run(cmd, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: "inherit", shell: process.platform === "win32", ...opts });
+    child.on("close", (code) => code === 0 ? resolve() : reject(new Error(`${cmd} ${args.join(" ")} exited ${code}`)));
+  });
+}
+
+// prereq: main entry
+const mainEntry = path.join(distDir, "main", "index.js");
+if (!(await exists(mainEntry))) {
   console.error(`Missing main entry point: ${mainEntry}`);
-  console.error("Run `bun run build` before packaging.");
+  console.error("Run `npm run build` before packaging.");
   process.exit(1);
 }
 
-// Check if cardmaker binary exists
-const cardmakerBinary = join(pyBuildDir, "cardmaker");
-try {
-  await Bun.file(cardmakerBinary).text();
-} catch {
-  console.error(`Missing cardmaker binary: ${cardmakerBinary}`);
-  console.error("Run `bun run build:py` first.");
-  process.exit(1);
-}
+// prereq: cardmaker binary
+// const cardmakerBinary = path.join(pyBuildDir, "cardmaker");
+// if (!(await exists(cardmakerBinary))) {
+//   console.error(`Missing cardmaker binary: ${cardmakerBinary}`);
+//   console.error("Run `npm run build:py` first.");
+//   process.exit(1);
+// }
 
-// Clean staging directory
-await $`rm -rf ${stagingDir}`.quiet();
-await $`mkdir -p ${stagingDir}`.quiet();
+// clean staging
+await fs.rm(stagingDir, { recursive: true, force: true });
+await fs.mkdir(stagingDir, { recursive: true });
 
-// Copy required files and directories
+// copy dirs
 const copyEntries = ["dist", "assets", "fonts"];
-
-// Copy required directories using Bun's file system API
 for (const entry of copyEntries) {
-  const src = join(root, entry);
-  const dest = join(stagingDir, entry);
-
-  try {
-    // Check if directory exists by trying to read it
-    await Bun.$`ls ${src}`.quiet();
-    // Use Bun's built-in recursive copy
-    await Bun.$`cp -r ${src} ${dest}`.quiet();
-  } catch {
+  const src = path.join(root, entry);
+  const dest = path.join(stagingDir, entry);
+  if (await exists(src)) {
+    await fs.cp(src, dest, { recursive: true, force: true });
+  } else {
     console.warn(`Warning: ${src} does not exist, skipping`);
   }
 }
 
-// Copy lockfile if it exists
-try {
-  await Bun.file(lockFile).text();
-  await Bun.$`cp ${lockFile} ${stagingDir}`.quiet();
-} catch {
-  // Lockfile doesn't exist, skip
+// copy lockfile if present
+if (await exists(lockFile)) {
+  await fs.cp(lockFile, path.join(stagingDir, path.basename(lockFile)));
 }
 
-// Create package.json for staging
-const rootPkg = JSON.parse(await Bun.file(join(root, "package.json")).text());
+// staging package.json
+const rootPkg = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8"));
 const appPkg = {
   name: rootPkg.name,
   productName: rootPkg.productName || "Gutenbird Studio",
@@ -93,30 +93,29 @@ const appPkg = {
   type: rootPkg.type,
   dependencies: rootPkg.dependencies || {},
 };
+await fs.writeFile(path.join(stagingDir, "package.json"), JSON.stringify(appPkg, null, 2));
 
-await Bun.write(
-  join(stagingDir, "package.json"),
-  JSON.stringify(appPkg, null, 2),
-);
-
-// Install production dependencies
+// install production deps in staging
 try {
-  await Bun.$`bun install`.cwd(stagingDir);
-} catch (err) {
+  // prefer npm ci if lockfile exists, else npm install --omit=dev
+  const hasPkgLock = await exists(path.join(root, "package-lock.json"));
+  if (hasPkgLock) {
+    await run("npm", ["ci", "--omit=dev"], { cwd: stagingDir });
+  } else {
+    await run("bun", ["install", "--omit=dev"], { cwd: stagingDir });
+  }
+} catch {
   console.error("Failed to install production dependencies for packaged app.");
   process.exit(1);
 }
 
-// Prepare electron-packager arguments
-const outDir = join(root, "release");
-await Bun.$`mkdir -p ${outDir}`.quiet();
+// prepare electron-packager args
+const outDir = path.join(root, "release");
+await fs.mkdir(outDir, { recursive: true });
 
 const appName = appPkg.productName || appPkg.name || "Gutenbird Studio";
 const packagerArgs = [
-  "bunx",
-  "electron-packager",
-  ".",
-  JSON.stringify(appName),
+  ".", appName,
   `--platform=${platform}`,
   `--arch=${arch}`,
   `--out=${outDir}`,
@@ -125,59 +124,38 @@ const packagerArgs = [
   `--extra-resource=${pyBuildDir}`,
 ];
 
-// Add platform-specific icon arguments
-try {
-  await Bun.$`ls ${iconDir}`.quiet();
-  switch (platform) {
-    case "win32":
-      const winIcon = join(iconDir, "app.ico");
-      try {
-        await Bun.file(winIcon).text();
-        packagerArgs.push(`--icon=${winIcon}`);
-        console.log(`Using Windows icon: ${winIcon}`);
-      } catch {
-        // Icon file doesn't exist
-      }
-      break;
-
-    case "darwin":
-      const macIcon = join(iconDir, "app.icns");
-      try {
-        await Bun.file(macIcon).text();
-        packagerArgs.push(`--icon=${macIcon}`);
-        console.log(`Using macOS icon: ${macIcon}`);
-      } catch {
-        // Icon file doesn't exist
-      }
-      break;
-
-    case "linux":
-      const linuxIcon = join(iconDir, "app.png");
-      try {
-        await Bun.file(linuxIcon).text();
-        packagerArgs.push(`--icon=${linuxIcon}`);
-        console.log(`Using Linux icon: ${linuxIcon}`);
-      } catch {
-        // Icon file doesn't exist
-      }
-      break;
+// platform icons
+if (await exists(iconDir)) {
+  if (platform === "win32") {
+    const winIcon = path.join(iconDir, "app.ico");
+    if (await exists(winIcon)) {
+      packagerArgs.push(`--icon=${winIcon}`);
+      console.log(`Using Windows icon: ${winIcon}`);
+    }
+  } else if (platform === "darwin") {
+    const macIcon = path.join(iconDir, "app.icns");
+    if (await exists(macIcon)) {
+      packagerArgs.push(`--icon=${macIcon}`);
+      console.log(`Using macOS icon: ${macIcon}`);
+    }
+  } else if (platform === "linux") {
+    const linuxIcon = path.join(iconDir, "app.png");
+    if (await exists(linuxIcon)) {
+      packagerArgs.push(`--icon=${linuxIcon}`);
+      console.log(`Using Linux icon: ${linuxIcon}`);
+    }
   }
-} catch {
-  // Icon directory doesn't exist
 }
 
-// Add forwarded arguments
+// forwarded args
 packagerArgs.push(...forwarded);
 
-// Run electron-packager
+// run electron-packager via npx
 try {
-  console.log(
-    "Running electron-packager with arguments:",
-    packagerArgs.join(" "),
-  );
-  await Bun.$`${packagerArgs}`.cwd(stagingDir).env({
-    ...process.env,
-    NODE_ENV: "production",
+  console.log("Running electron-packager with arguments:", ["npx", "electron-packager", ...packagerArgs].join(" "));
+  await run("bunx", ["electron-packager", ...packagerArgs], {
+    cwd: stagingDir,
+    env: { ...process.env, NODE_ENV: "production" },
   });
   console.log("Packaging completed successfully!");
 } catch (err) {
