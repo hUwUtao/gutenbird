@@ -12,7 +12,8 @@
     "generate:icons": "node scripts/generate-icons.mjs",
     "build:py": "uv run --python cpython3.12 pyinstaller -y cardmaker.py --onedir --name cardmaker --collect-binaries cairo --collect-all cairosvg --collect-all pywin32-ctypes --distpath build/py --specpath build/py",
     "build:linux": "bun run build:py && node package-electron.js linux",
-    "build:win": "bun run build:py && node package-electron.js win32"
+    "build:win": "bun run build:py && node package-electron.js win32",
+    "build:macos": "bun run build:py && node package-electron.js darwin"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

@@ -19,23 +19,9 @@ import {
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
+import { useLocalStorage, useScrollIntoView } from "@mantine/hooks";
 
 const isClient = typeof window !== "undefined";
-
-const getStored = (key, fallback = "") => {
-  if (!isClient) return fallback;
-  const value = window.localStorage.getItem(key);
-  return value ?? fallback;
-};
-
-const setStored = (key, value) => {
-  if (!isClient) return;
-  if (value === undefined || value === null || value === "") {
-    window.localStorage.removeItem(key);
-    return;
-  }
-  window.localStorage.setItem(key, String(value));
-};
 
 const toFileUrl = (filePath, pathToFileURL) => {
   if (!filePath) return "";
@@ -87,50 +73,68 @@ function App() {
   const { fs, path, pathToFileURL } = useNodeModules();
 
   const preloadToken = useRef(0);
-  const scrollViewportRef = useRef(null);
+  const { scrollIntoView, targetRef } = useScrollIntoView();
 
   const legacyCellStack = useMemo(
     () => (isClient ? window.localStorage.getItem("cellStack") : null),
     [],
   );
 
-  const [templatePath, setTemplatePath] = useState(() =>
-    getStored("templatePath"),
-  );
-  const [albumPath, setAlbumPath] = useState(() => getStored("albumPath"));
-  const [customOutputDir, setCustomOutputDir] = useState(() =>
-    getStored("outputDir"),
-  );
-  const [parity, setParity] = useState(() => {
-    const storedParity = getStored("parity") || legacyCellStack;
-    const parsed = Number.parseInt(storedParity || "1", 10);
-    return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+  const [templatePath, setTemplatePath] = useLocalStorage({
+    key: "templatePath",
+    defaultValue: "",
   });
-  const [copies, setCopies] = useState(() => {
-    const stored = getStored("copies", "1");
-    const parsed = Number.parseInt(stored || "1", 10);
-    return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+  const [albumPath, setAlbumPath] = useLocalStorage({
+    key: "albumPath",
+    defaultValue: "",
   });
-  const [cellStackMode, setCellStackMode] = useState(() => {
-    const stored = getStored("cellStackMode");
-    if (stored === "true" || stored === "false") {
-      return stored === "true";
-    }
-    if (
-      legacyCellStack &&
-      Number.isInteger(Number.parseInt(legacyCellStack, 10)) &&
-      Number.parseInt(legacyCellStack, 10) > 1
-    ) {
-      return true;
-    }
-    return false;
+  const [customOutputDir, setCustomOutputDir] = useLocalStorage({
+    key: "outputDir",
+    defaultValue: "",
   });
-  const [testDataEnabled, setTestDataEnabled] = useState(
-    () => getStored("testDataEnabled") === "true",
-  );
-  const [testDataValue, setTestDataValue] = useState(() =>
-    getStored("testDataValue"),
-  );
+  const [parity, setParity] = useLocalStorage({
+    key: "parity",
+    defaultValue: 1,
+    deserialize: (value) => {
+      const storedParity = value || legacyCellStack;
+      const parsed = Number.parseInt(storedParity || "1", 10);
+      return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+    },
+  });
+  const [copies, setCopies] = useLocalStorage({
+    key: "copies",
+    defaultValue: 1,
+    deserialize: (value) => {
+      const parsed = Number.parseInt(value || "1", 10);
+      return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+    },
+  });
+  const [cellStackMode, setCellStackMode] = useLocalStorage({
+    key: "cellStackMode",
+    defaultValue: false,
+    deserialize: (value) => {
+      if (value === "true" || value === "false") {
+        return value === "true";
+      }
+      if (
+        legacyCellStack &&
+        Number.isInteger(Number.parseInt(legacyCellStack, 10)) &&
+        Number.parseInt(legacyCellStack, 10) > 1
+      ) {
+        return true;
+      }
+      return false;
+    },
+  });
+  const [testDataEnabled, setTestDataEnabled] = useLocalStorage({
+    key: "testDataEnabled",
+    defaultValue: false,
+    deserialize: (value) => value === "true",
+  });
+  const [testDataValue, setTestDataValue] = useLocalStorage({
+    key: "testDataValue",
+    defaultValue: "",
+  });
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [progressLog, setProgressLog] = useState("");
@@ -140,43 +144,6 @@ function App() {
   const [currentPage, setCurrentPage] = useState(0);
   const [isLoadingOutput, setIsLoadingOutput] = useState(false);
   const [activeTab, setActiveTab] = useState("template");
-
-  useEffect(() => {
-    setStored("templatePath", templatePath);
-  }, [templatePath]);
-
-  useEffect(() => {
-    setStored("albumPath", albumPath);
-  }, [albumPath]);
-
-  useEffect(() => {
-    setStored("outputDir", customOutputDir);
-  }, [customOutputDir]);
-
-  useEffect(() => {
-    setStored("parity", parity);
-  }, [parity]);
-
-  useEffect(() => {
-    setStored("copies", copies);
-  }, [copies]);
-
-  useEffect(() => {
-    setStored("cellStackMode", cellStackMode ? "true" : "false");
-  }, [cellStackMode]);
-
-  useEffect(() => {
-    setStored("testDataEnabled", testDataEnabled ? "true" : "false");
-  }, [testDataEnabled]);
-
-  useEffect(() => {
-    const raw = testDataValue ?? "";
-    if (!raw.trim()) {
-      setStored("testDataValue", "");
-      return;
-    }
-    setStored("testDataValue", raw);
-  }, [testDataValue]);
 
   useEffect(() => {
     if (!legacyCellStack) return;
@@ -347,10 +314,8 @@ function App() {
   }, [ipcRenderer, prepareOutputPreview, clearOutputPreview]);
 
   useEffect(() => {
-    const viewport = scrollViewportRef.current;
-    if (!viewport) return;
-    viewport.scrollTo({ top: viewport.scrollHeight });
-  }, [progressLog]);
+    scrollIntoView({ alignment: "end" });
+  }, [progressLog, scrollIntoView]);
 
   useEffect(() => {
     if (!outputPages.length) return;
@@ -657,7 +622,6 @@ function App() {
                 <ScrollArea
                   h={220}
                   type="auto"
-                  viewportRef={scrollViewportRef}
                   style={{
                     borderRadius: 12,
                     border: "1px solid rgba(255,255,255,0.1)",
@@ -676,6 +640,7 @@ function App() {
                         Progress output will appear here.
                       </Text>
                     )}
+                    <div ref={targetRef} />
                   </Box>
                 </ScrollArea>
               </Stack>

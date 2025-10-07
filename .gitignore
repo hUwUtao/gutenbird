@@ -15,3 +15,6 @@ cardmaker
 cardmaker.exe
 cardmaker.spec
 package-lock.json
+
+# Build
+release
